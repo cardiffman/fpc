@@ -89,6 +89,98 @@ typedef struct {
     const char *s;
 } result_t;
 
+typedef enum {
+	T_NAME,
+	T_PUNCT,
+	T_NUM,
+	T_SEMI,
+	T_EQUALS,
+	T_LPAREN,
+	T_RPAREN,
+	T_LT,
+	T_GT,
+	T_LE,
+	T_RE,
+	T_OR,
+	T_AND,
+	//T_IF,
+	T_EOF
+} Token;
+typedef struct {
+	Token type;
+	char* s;
+	int value;
+} tkn;
+tkn token;
+char* s;
+void next() {
+	while (true){
+		while (*s == ' ' || *s=='\t' || *s=='\n')
+			s++;
+		if (*s=='#') {
+			s = strchr(s,'\n');
+			continue;
+		}
+		break;
+	}
+	if (!*s) {
+		token.type = T_EOF;
+		return;
+	}
+	switch (*s) {
+	case ';': token.type = T_SEMI; s++; return;
+	case '(': token.type = T_LPAREN; s++; return;
+	case ')': token.type = T_RPAREN; s++; return;
+	}
+	char* t =s;
+	if (isalpha(*s)) {
+		while (isalnum(*t) || *t=='_' || *t=='\'')
+			++t;
+		free(token.s);
+		token.s = NEWA(char, t-s+1);
+		memcpy(token.s, s, t-s);
+		token.s[t-s]=0;
+		token.type = T_NAME;
+		s = t;
+		return;
+	}
+	if (isdigit(*t)) {
+		token.value = *t - '0';
+		++t;
+		while (isdigit(*t)) {
+			token.value = token.value*10 + *t-'0';
+			++t;
+		}
+		token.type = T_NUM;
+		s = t;
+		return;
+	}
+
+	while (!isalnum(*t) && *t!=';' &&*t !=')' && *t!='(' && *t!=' ' && *t!='\t' && *t!='\n' && *t!='#') {
+		++t;
+	}
+	free(token.s);
+	token.s = NEWA(char, t-s+1);
+	memcpy(token.s, s, t-s);
+	token.s[t-s]=0;
+	token.type = T_PUNCT;
+	s = t;
+	return;
+#if 0
+	if (ispunct(*t) && *t!=';' &&*t !=')' && *t!='(') {
+		++t;
+		while (ispunct(*t) && *t!=';' &&*t !=')' && *t!='(') {
+			++t;
+		}
+		free(token.s);
+		token.s = NEWA(char, t-s+1);
+		memcpy(token.s, s, t-s);
+		token.s[t-s]=0;
+		token.type = T_PUNCT;
+		return;
+	}
+#endif
+}
 int isname0(char c)
 {
     return isalpha(c);
@@ -385,58 +477,51 @@ result_t *parse_args(const char *s)
     return r;
 }
 
-result_t *parse_def(const char *s)
+result_t* parse_expr2()
 {
-    static const char eq[] = {':', '='};
-
+	list_t* terms;
+    while (token.type != T_EOF && token.type != T_SEMI) {
+		terms = cons(token.s, terms);
+		next();
+    }
+    return terms;
+}
+result_t *parse_def()
+{
     result_t *r = NULL;
     result_t *rname = NULL;
     result_t *rargs = NULL;
     result_t *rrhs = NULL;
     result_t *rend = NULL;
 
-    s = skipws(skip_empty_lines(s));
+    if (token.type != T_NAME)
+		return NULL;
+    rname = NEW(result_t);
+    rname->data = token.s;
 
-    // supercombinator name
-    rname = parse_name(s);
-    if(!rname) return NULL;
-    s = rname->s;
+    next();
 
-    // argument list
-    rargs = parse_args(s);
-    assert(rargs != NULL);
-    list_t *args = rargs->data;
-    s = rargs->s;
-
-    // equals sign
-    s = skipws(s);
-    //if(strncmp(s, eq, sizeof(eq))) return NULL;
-    //s = s + sizeof(eq);
-    assert (*s == '=');
-    if (*s == '=') {
-    	s++;
+    while (token.type == T_NAME) {
+		r = NEW(result_t);
+		r->data = token.s;
+		rargs = cons(r, rargs);
+		next();
     }
 
-    // right-hand side
-    rrhs = parse_expr(s);
+    assert(token.type == T_PUNCT && strcmp(token.s,"=")==0);
+    next();
+
+    rrhs = parse_expr2();
+
     if(!rrhs) return NULL;
-    s = rrhs->s;
-
-    // semicolon or end of line
-    s = skipws(s);
-    if(*s == ';') {
-        s++;
-    } else {
-        rend = parse_eol(s);
-        if(!rend) return NULL;
-        s = rend->s;
-    }
+    assert(token.type == T_SEMI);
+    next();
 
     r = NEW(result_t);
     r->s = s;
     def_t *def = NEW(def_t);
     def->name = rname->data;
-    def->args = args;
+    def->args = rargs;
     def->rhs = rrhs->data;
     r->data = def;
 
@@ -533,6 +618,21 @@ int main(int argc, char** argv)
     }
    	buf[len] = 0;
 
+	s = buf;
+	next();
+	while (token.type != T_EOF) {
+		switch (token.type) {
+		case T_NAME: printf("T_NAME: %s\n", token.s); break;
+		case T_PUNCT: printf("T_PUNCT: %s\n", token.s); break;
+		case T_NUM: printf("T_NUM: %d\n", token.value); break;
+		case T_SEMI: printf("T_SEMI\n"); break;
+		case T_LPAREN: printf("T_LPAREN\n"); break;
+		case T_RPAREN: printf("T_RPAREN\n"); break;
+
+		}
+		next();
+	}
+	return 0;
     r = parse_defs(buf);
 
     if(r == NULL) {
