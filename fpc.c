@@ -1113,7 +1113,7 @@ void addCondCombinator(CodeArray* code, list_t** env) {
 	entry->args = 3;
 	entry->mode.mode = Super;
 	entry->mode.params.address = res;
-	entry->name = "cond";
+	entry->name = "if";
 	*env = cons(entry, *env);
 }
 void addMarkers(CodeArray* code, list_t* defs) {
