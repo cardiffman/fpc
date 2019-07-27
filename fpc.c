@@ -137,8 +137,14 @@ void next() {
 		while (*s == ' ' || *s=='\t' || *s=='\n')
 			s++;
 		if (*s=='#') {
-			s = strchr(s,'\n');
-			continue;
+			char* t = strchr(s,'\n');
+			if (t) {
+				s = t;
+				continue;
+			} else {
+				s += strlen(s);
+				break;
+			}
 		}
 		break;
 	}
@@ -355,46 +361,50 @@ result_t *parse_expr()
 	return parse_expr1();
 }
 
-result_t *parse_def(void)
-{
-    result_t *r = NULL;
-    result_t *rname = NULL;
-    list_t* rargs = NULL;
-    result_t *rrhs = NULL;
-
-    if (token.type != T_NAME)
-		return NULL;
-    rname = NEW(result_t);
-    rname->data = strdup(token.s);
-
-    next();
-
+list_t* parse_names(void) {
+	list_t* names = NULL;
 	while (token.type == T_NAME) {
-		//r = NEW(result_t);
-		//r->data = token.s;
-		rargs = cons(strdup(token.s), rargs);
+		char* first = strdup(token.s);
 		next();
-    }
+		list_t* rest = parse_names();
+		names = cons(first, rest);
+	}
+	return names;
+}
+result_t *parse_def(void) {
+	result_t *r = NULL;
+	result_t *rname = NULL;
+	list_t* rargs = NULL;
+	result_t *rrhs = NULL;
 
-    assert(token.type == T_EQUALS);
-    next();
+	if (token.type != T_NAME)
+		return NULL;
+	rname = NEW(result_t);
+	rname->data = strdup(token.s);
 
-    //rrhs = parse_expr_new();
-    rrhs = parse_expr();
+	next();
 
-    if(!rrhs) return NULL;
-    assert(token.type == T_SEMI || token.type == T_EOF);
-    next();
+	rargs = parse_names();
 
-    r = NEW(result_t);
-    r->s = s;
-    def_t *def = NEW(def_t);
-    def->name = rname->data;
-    def->args = rargs;
-    def->rhs = rrhs->data;
-    r->data = def;
+	assert(token.type == T_EQUALS);
+	next();
 
-    return r;
+	rrhs = parse_expr();
+
+	if (!rrhs)
+		return NULL;
+	assert(token.type == T_SEMI || token.type == T_EOF);
+	next();
+
+	r = NEW(result_t);
+	r->s = s;
+	def_t *def = NEW(def_t);
+	def->name = rname->data;
+	def->args = rargs;
+	def->rhs = rrhs->data;
+	r->data = def;
+
+	return r;
 }
 
 result_t *parse_defs()
@@ -445,12 +455,12 @@ void pprint_expr(int col, const expr_t *e)
     case EXPR_NUM:
         printf("NUM %d\n", e->num);
         break;
-    case EXPR_OPER: {
+	case EXPR_OPER: {
 		tkn t;
 		t.type = e->op;
 		printf("OPER %s\n", token_to_string(&t));
 		break;
-    }
+	}
     default:
         printf("?%d?\n", e->tag);
         break;
@@ -475,7 +485,7 @@ void pprint_defs(int col, const list_t *defs)
 }
 
 typedef enum InstructionType {
-	Halt, Take, Push, Enter, EnterT, Op
+	Halt, Take, Push, Enter, EnterT, Op, CheckMarkers
 } InstructionType;
 const char* insToString(InstructionType ins) {
 	switch (ins) {
@@ -485,6 +495,7 @@ const char* insToString(InstructionType ins) {
 	case Enter: return "Enter";
 	case EnterT: return "EnterT";
 	case Op: return "Op";
+	case CheckMarkers: return "CheckMarkers";
 	}
 	return "inxxx";
 }
@@ -537,6 +548,7 @@ const char* instructionToString(Instruction* ins) {
 	text[0] = 0;
 	switch (ins->ins) {
 	case Halt: return insToString(ins->ins);
+	case CheckMarkers:
 	case Take: snprintf(text, 50, "%s %d", insToString(ins->ins), ins->take); break;
 	case Push:
 	case Enter:
@@ -581,6 +593,13 @@ void haltInstruction(CodeArray* code) {
 	addInstruction(code, n);
 }
 static
+void checkMarkersInstruction(CodeArray* code, unsigned take) {
+	Instruction n;
+	n.ins = CheckMarkers;
+	n.take = take;
+	addInstruction(code, n);
+}
+static
 void takeInstruction(CodeArray* code, unsigned take) {
 	Instruction n;
 	n.ins = Take;
@@ -622,7 +641,6 @@ void pushSuperInstruction(CodeArray* code, ptrdiff_t label) {
 	n.addr.params.address = label;
 	addInstruction(code, n);
 }
-#endif
 static
 void pushNumInstruction(CodeArray* code, ptrdiff_t num) {
 	Instruction n;
@@ -631,7 +649,6 @@ void pushNumInstruction(CodeArray* code, ptrdiff_t num) {
 	n.addr.params.address = num;
 	addInstruction(code, n);
 }
-#if 0
 static
 void pushCodeInstruction(CodeArray* code, CodeArray* dest) {
 	Instruction n;
@@ -717,14 +734,9 @@ list_t* envAddArgs(list_t* env, const list_t* args) {
 		char* arg = args->data;
         struct env_t* entry = NEW(struct env_t);
         entry->name = arg;
-#if 1
         entry->mode.mode = Label;
         entry->mode.params.address = 2*kArg;
         kArg++;
-#else
-        entry->mode.mode = Arg;
-        entry->mode.params.arg = kArg++;
-#endif
         env = cons(entry, env);
 	}
     //printf("envAddArgs "); pprint_env(env);
@@ -754,80 +766,6 @@ bool find_mode(list_t* env, expr_var_t var, AddressMode* mode) {
 	return false;
 }
 
-static
-CodeArray* compilePushVar(CodeArray* code, expr_var_t var, list_t* env) {
-	AddressMode mode;
-	if (find_mode(env, var, &mode)) {
-		pushInstruction(code, mode);
-	}
-	return code;
-}
-static
-CodeArray* compilePushNum(CodeArray* code, expr_num_t num, list_t* env) {
-	pushNumInstruction(code, num);
-	return code;
-}
-static
-CodeArray* compileEnterExp(CodeArray* code, const expr_t* exp, list_t* env);
-static
-CodeArray* compilePushExp(CodeArray* code, const expr_t* exp, list_t* env);
-static
-CodeArray* compilePushApp(CodeArray* code, expr_app_t app, list_t* env) {
-	code = compilePushExp(code, app.arg, env);
-	code = compileEnterExp(code, app.fun, env);
-	printf("Review %s in this scenario:\n", __FUNCTION__);
-	expr_t fake;
-	fake.tag = EXPR_APP;
-	fake.app = app;
-	pprint_expr(0, &fake);
-	printf("%s","\n");
-	return code;
-}
-static
-CodeArray* compilePushExp(CodeArray* code, const expr_t* exp, list_t* env) {
-	switch (exp->tag)
-	{
-	case EXPR_APP: return compilePushApp(code, exp->app, env);
-	case EXPR_NUM: return compilePushNum(code, exp->num, env);
-	case EXPR_VAR: return compilePushVar(code, exp->var, env);
-	case EXPR_OPER: puts("EXPR_OPER not handled in compilePushExp"); exit(1); return NULL;
-	case EXPR_STR: puts("EXPR_STR not handled in compilePushExp"); exit(1); return NULL;
-	}
-	return code;
-}
-static
-CodeArray* compileEnterVar(CodeArray* code, expr_var_t var, list_t* env) {
-	AddressMode mode;
-	if (find_mode(env, var, &mode)) {
-		enterInstruction(code, mode);
-	}
-	return code;
-}
-static
-CodeArray* compileEnterNum(CodeArray* code, expr_num_t num, list_t* env) {
-	enterNumInstruction(code, num);
-	return code;
-}
-static
-CodeArray* compileEnterExp(CodeArray* code, const expr_t* exp, list_t* env);
-static
-CodeArray* compileEnterApp(CodeArray* code, expr_app_t app, list_t* env) {
-	code = compilePushExp(code, app.arg, env);
-	code = compileEnterExp(code, app.fun, env);
-	return code;
-}
-static
-CodeArray* compileEnterExp(CodeArray* code, const expr_t* exp, list_t* env) {
-	switch (exp->tag)
-	{
-	case EXPR_APP: return compileEnterApp(code, exp->app, env);
-	case EXPR_NUM: return compileEnterNum(code, exp->num, env);
-	case EXPR_VAR: return compileEnterVar(code, exp->var, env);
-	case EXPR_OPER: puts("EXPR_OPER not handled in compileEnterExp"); exit(1); return NULL;
-	case EXPR_STR: puts("EXPR_STR not handled in compileEnterExp"); exit(1); return NULL;
-	}
-	return code;
-}
 static
 AddressMode compileAExp(const expr_t* exp, list_t* env);
 static
@@ -872,19 +810,15 @@ CodeArray* compileRVar(CodeArray* code, expr_var_t var, list_t* env) {
 }
 static
 CodeArray* compileRNum(CodeArray* code, expr_num_t num, list_t* env) {
-	return compileEnterNum(code, num, env);
+	enterNumInstruction(code, num);
+	return code;
 }
 static
 CodeArray* compileRApp(CodeArray* code, expr_app_t app, list_t* env) {
 	// compileR (EAp e1 e2) env = Push (compileA e2 env) : compileR e1 env
 	AddressMode toPush = compileAExp(app.arg, env);
 	pushInstruction(code, toPush);
-	code = compileRExp(code, app.fun, env);
-	//AddressMode e1;
-	//e1.mode = List;
-	//e1.params.code = code;
-	//return e1;
-	return code;
+	return compileRExp(code, app.fun, env);
 }
 static
 CodeArray* compileROper(CodeArray* code, const expr_oper_t op, list_t* env) {
@@ -935,7 +869,14 @@ CodeArray* compileDef(CodeArray* code, def_t* def, list_t* env) {
 	//def->args;
 	//def->name;
 	//def->rhs; // expr_t
-	takeInstruction(code, length(def->args));
+	unsigned nArgs = length(def->args);
+	if (nArgs) {
+		for (unsigned i=0; i<nArgs-1; ++i) {
+			pushLabelInstruction(code, 2*(nArgs-i));
+		}
+		checkMarkersInstruction(code, nArgs);
+		takeInstruction(code, nArgs);
+	}
 	list_t* new_env = envDup(env);
 	new_env = envAddArgs(new_env, def->args);
 	compileRExp(code, def->rhs, new_env);
@@ -963,7 +904,7 @@ CodeArray* compileDef(CodeArray* code, def_t* def, list_t* env) {
 enum {
 	SELF = -1,
 };
-static ptrdiff_t MARKER = -2;
+static ptrdiff_t MARKER_PC = -2;
 
 struct Closure {
 	ptrdiff_t pc;
@@ -1010,7 +951,7 @@ void stepPush(const Instruction* ins) {
 		break;
 	case Marker:
 		toPush = NEW(struct Closure);
-		toPush->pc = MARKER - ins->addr.params.arg;
+		toPush->pc = MARKER_PC - ins->addr.params.arg;
 		toPush->frame = state.frame;
 		break;
 	default:
@@ -1026,6 +967,13 @@ void stepEnter(const Instruction* ins) {
 		break;
 	case Arg:
 		state = state.frame[ins->addr.params.arg];
+		if (state.pc >=0 && state.frame != 0) {
+			printf("Enter w/New Frame: ");
+			for (int i=0; i<2; ++i) {
+				printf("%ld|%p ", state.frame[i].pc, state.frame[i].frame);
+			}
+			puts("");
+		}
 		break;
 	case Label:
 		state.pc = ins->addr.params.address;
@@ -1054,6 +1002,31 @@ void stepOp(const Instruction* ins) {
 	case Lt:  state.value = leftC->value < rightC->value; break;
 	}
 }
+void stepCheckMarkers(const Instruction* ins) {
+	unsigned stack_check_length = length(stack);
+	list_t* checkStack = stack;
+	struct Closure* check = head(checkStack); checkStack=tail(checkStack);
+	for (int m=0; m<ins->take; ++m) {
+		if (check->pc <= MARKER_PC) {
+			ptrdiff_t slot = MARKER_PC - check->pc;
+			struct Closure* newFrame = NEWA(struct Closure, m);
+			for (int i=0; i<m-1; ++i) {
+				newFrame[i] = *(struct Closure*)head(stack); stack=tail(stack);
+			}
+			for (int i=m-1; i>=0; i--) {
+				struct Closure* n = NEW(struct Closure);
+				n->pc = i*2;
+				n->frame = newFrame;
+				stack = cons(n, stack);
+			}
+			assert(length(stack) == stack_check_length);
+			state.frame[slot].pc = state.pc - 1 - m - 1;
+			state.frame[slot].frame = newFrame;
+			state.pc--; // step back
+			return;
+		}
+	}
+}
 void step(CodeArray* code) {
 	if (state.pc < 0)
 		return; // We don't run SELF or MARKER yet.
@@ -1063,6 +1036,9 @@ void step(CodeArray* code) {
 	state.pc ++;
 
 	switch (code->code[old_pc].ins) {
+	case CheckMarkers:
+		stepCheckMarkers(&code->code[old_pc]);
+		break;
 	case Take:
 		stepTake(&code->code[old_pc]);
 		break;
@@ -1081,9 +1057,9 @@ void step(CodeArray* code) {
 	}
 	if (state.pc == SELF) {
 		struct Closure* mark = head(stack);
-		while (mark->pc <= MARKER) {
+		while (mark->pc <= MARKER_PC) {
 			struct Closure* fr = mark->frame;
-			int slot = MARKER - mark->pc;
+			int slot = MARKER_PC - mark->pc;
 			fr[slot] = state;
 			stack = tail(stack);
 			mark = head(stack);
