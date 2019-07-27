@@ -236,131 +236,142 @@ const char* token_to_string(const tkn* token) {
 result_t *parse_expr();
 
 void pprint_expr(int col, const expr_t *e);
-result_t* op_apply(Token t, result_t* left, result_t* right) {
-    expr_t* op = NEW(expr_t);
-    op->tag = EXPR_OPER;
-    op->op = t;
-    expr_t *innera = NEW(expr_t);
-    innera->tag = EXPR_APP;
-    innera->app.fun = op;
-    innera->app.arg = left->data;
-    expr_t* outera = NEW(expr_t);
-    outera->tag = EXPR_APP;
-    outera->app.fun = innera;
-    outera->app.arg = right->data;
-    result_t* r = NEW(result_t);
-    r->data = outera;
-    r->s = right->s;
-    return r;
+expr_t* mkleaf(tkn t) {
+	expr_t* r = NEW(expr_t);
+	switch (t.type) {
+	case T_NAME: r->tag = EXPR_VAR; r->var = strdup(t.s); break;
+	case T_NUM: r->tag = EXPR_NUM; r->num = t.value; break;
+	default: return NULL;
+	}
+	return r;
 }
-
-result_t* parse_expr6() {
-	expr_t* term = NULL;
-	while (token.type == T_NAME || token.type == T_NUM || token.type == T_PUNCT || token.type == T_LPAREN) {
-		expr_t* arg = NEW(expr_t);
-		switch (token.type) {
-		case T_NAME: arg->tag = EXPR_VAR; arg->var = strdup(token.s); break;
-		case T_NUM: arg->tag = EXPR_NUM; arg->num = token.value; break;
-		case T_PUNCT: arg->tag = EXPR_VAR; arg->var = strdup(token.s); break;
-		case T_LPAREN: {
-				next();
-				result_t* inner = parse_expr();
-				arg = inner->data;
-				assert(token.type == T_RPAREN);
-			}
-			break;
-
-		default:
-			printf("No use for current token %s\n", token_to_string(&token));
-			exit(1);
-			break;
-		}
-		if (term == NULL)
-			term = arg;
-		else {
-			expr_t* call = NEW(expr_t);
-			call->tag = EXPR_APP;
-			call->app.fun = term;
-			call->app.arg = arg;
-			term = call;
-		}
+expr_t* mkop(Token t) {
+	expr_t* r = NEW(expr_t);
+	r->tag = EXPR_OPER;
+	r->op = t;
+	return r;
+}
+expr_t* mkapp(expr_t* fun, expr_t* arg) {
+	expr_t* r = NEW(expr_t);
+	r->tag = EXPR_APP;
+	r->app.fun = fun;
+	r->app.arg = arg;
+	return r;
+}
+bool atom(tkn t) {
+	switch (t.type) {
+	case T_NAME:
+	case T_NUM:
+		return true;
+	default: break;
+	}
+	return false;
+}
+bool binop(Token t) {
+	switch (t) {
+	case T_OR:
+	case T_AND:
+	case T_ADD:
+	case T_SUB:
+	case T_MUL:
+	case T_DIV:
+	case T_LT:
+		return true;
+	default: break;
+	}
+	return false;
+}
+bool postfix(tkn t) {
+	return false; // don't have these yet.
+}
+int precedence(Token t) {
+	switch (t){
+	case T_OR:
+		return 2;
+	case T_AND:
+		return 3;
+	case T_LT:
+		return 4;
+	case T_ADD: case T_SUB:
+		return 5;
+	case T_DIV:
+		return 6;
+	case T_MUL:
+		return 7;
+	default: break;
+	}
+	return 1;
+}
+int rightPrec(Token t) {
+	switch (t){
+	case T_OR:
+		return 3;
+	case T_AND:
+		return 4;
+	case T_LT:
+		return 5;
+	case T_ADD: case T_SUB:
+		return 6;
+	case T_DIV:
+		return 7;
+	case T_MUL:
+		return 8;
+	default: break;
+	}
+	return 1;
+}
+int nextPrec(tkn t) {
+	switch (t.type){
+	case T_OR:
+		return 1;
+	case T_AND:
+		return 2;
+	case T_LT:
+		return 3;
+	case T_ADD: case T_SUB:
+		return 4;
+	case T_DIV:
+		return 5;
+	case T_MUL:
+		return 6;
+	default: break;
+	}
+	return -1;
+}
+expr_t* P(void);
+expr_t* E(int p) {
+	expr_t* t = P();
+	while (atom(token) || token.type == T_LPAREN) {
+		expr_t* arg = P();
+		t = mkapp(t, arg);
+	}
+	int r = 8;
+	while ((binop(token.type) || postfix(token)) && p <= precedence(token.type) && precedence(token.type) <= r) {
+		tkn b = token;
 		next();
-	}
-	result_t* res = NEW(result_t);
-	res->data = term;
-	res->s = NULL;
-	return res;
-}
-result_t* parse_expr5() {
-	result_t* r1 = parse_expr6();
-	if (r1) {
-		if (token.type == T_MUL || token.type == T_DIV) {
-			Token type = token.type;
-			next();
-			result_t* r2 = parse_expr5();
-			return op_apply(type, r1, r2);
+		if (binop(b.type)) {
+			expr_t* t1 = E(rightPrec(b.type));
+			t = mkapp(mkapp(mkop(b.type), t), t1);
+		} else {
+			t = mkapp(mkop(b.type), t);
 		}
+		r = nextPrec(b);
 	}
-	return r1;
+	return t;
 }
-result_t* parse_expr4() {
-	result_t* r1 = parse_expr5();
-	if (r1) {
-		if (token.type == T_ADD || token.type == T_SUB) {
-			Token type = token.type;
-			next();
-			result_t* r2 = parse_expr4(s);
-			return op_apply(type, r1, r2);
-		}
-	}
-	return r1;
+expr_t* P(void) {
+	if (token.type == T_SUB) { next(); expr_t* t = E(2); return mkapp(mkop(T_SUB), t); }
+	else if (token.type == T_LPAREN) { next(); expr_t* t = E(0); assert(token.type==T_RPAREN); next(); return t; }
+	else if (atom(token)) { expr_t* t = mkleaf(token); next(); return t; }
+	else exit(1);
 }
-result_t* parse_expr3() {
-	result_t* r1 = parse_expr4();
-	result_t* r2;
-	Token type;
-	if (r1) {
-		switch (token.type) {
-		case T_LE:
-		case T_GE:
-		case T_LT:
-		case T_GT:
-			type = token.type;
-			next();
-			r2 = parse_expr3(s);
-			return op_apply(type, r1, r2);
-		default:
-			break;
-		}
-	}
-	return r1;
+result_t* parse_expr() {
+	 expr_t* e = E(0);
+	 result_t* r = NEW(result_t);
+	 r->data = e;
+	 r->s = NULL;
+	 return r;
 }
-result_t* parse_expr2() {
-	result_t* r1 = parse_expr3(s);
-	if (r1) {
-		if (token.type == T_AND) {
-			result_t* r2 = parse_expr2();
-			return op_apply(token.type, r1, r2);
-		}
-	}
-	return r1;
-}
-result_t* parse_expr1() {
-	result_t* r1 = parse_expr2();
-
-	if (r1) {
-		if (token.type == T_OR) {
-			result_t* r2 = parse_expr1();
-			return op_apply(token.type, r1, r2);
-		}
-	}
-	return r1;
-}
-result_t *parse_expr()
-{
-	return parse_expr1();
-}
-
 list_t* parse_names(void) {
 	list_t* names = NULL;
 	while (token.type == T_NAME) {
