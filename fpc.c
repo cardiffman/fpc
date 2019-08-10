@@ -958,12 +958,14 @@ void showSomeFrame(struct Closure* frame) {
 	showSomeFrameElts(frame, 2);
 }
 void showMainFrameElts(int elts) {
-	showSomeFrameElts(state.frame, elts);
-	return;
-	for (int i=0; i<elts; ++i) {
-		printf("%s|%p ", pcToString(state.frame[i].pc), state.frame[i].frame);
+	if (state.pc == SELF)
+	{
+		printf("%s|%p\n", pcToString(state.pc), state.value);
 	}
-	puts("");
+	else
+	{
+		showSomeFrameElts(state.frame, elts);
+	}
 }
 void showMainFrame() {
 	showMainFrameElts(2);
@@ -1043,21 +1045,13 @@ void stepEnter(const Instruction* ins) {
 	struct Closure* arg;
 	switch (ins->addr.mode) {
 	case Num:
-		puts("Entering a number??");
-		closure = head(stack);
-		stack = tail(stack);
-		toPush = NEW(struct Closure);
-		toPush->value = ins->addr.params.address;
-		toPush->pc = SELF;
-		//state.pc = SELF;
-		//state.value = ins->addr.params.address;
-		stack = cons(toPush, stack);
-		state.pc = closure->pc;
-		state.frame = closure->frame;
+		state.pc = SELF;
+		state.value = ins->addr.params.address;
 		showMainFrame();
 		break;
 	case Arg:
 		printf("Entering Arg %ld: %s\n", ins->addr.params.arg, pcToString(state.frame[ins->addr.params.arg].pc));
+		showMainFrame();
 		arg = &state.frame[ins->addr.params.arg];
 		if (arg->pc == SELF)
 		{
