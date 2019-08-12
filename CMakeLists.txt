@@ -35,6 +35,6 @@ set_tests_properties(show5 PROPERTIES PASS_REGULAR_EXPRESSION "Halt\r\n SELF\\|1
 add_test(NAME show5main COMMAND fpc ../tests/show5main.dat)
 set_tests_properties(show5main PROPERTIES PASS_REGULAR_EXPRESSION "Halt\r\n SELF\\|102030405")
 add_test(NAME skkid COMMAND fpc ../tests/skkid.dat)
-set_tests_properties(skkid PROPERTIES PASS_REGULAR_EXPRESSION "Halt\r\n SELF\\|6")
+set_tests_properties(skkid PROPERTIES PASS_REGULAR_EXPRESSION "Halt\r\n SELF\\|3")
 add_test(NAME sumsums COMMAND fpc ../tests/sumsums.dat)
 set_tests_properties(sumsums PROPERTIES PASS_REGULAR_EXPRESSION "Halt\r\n SELF\\|14")
