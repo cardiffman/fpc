@@ -101,7 +101,6 @@ typedef struct {
 
 typedef struct {
     void *data;
-    const char *s;
 } result_t;
 
 typedef enum {
@@ -131,59 +130,67 @@ typedef struct {
 	int value;
 } tkn;
 tkn token;
-char* s;
+int ch;
+FILE* fp;
+void nextChar()
+{
+	ch = fgetc(fp);
+}
+//char* s;
 void next() {
 	while (true){
-		while (*s == ' ' || *s=='\t' || *s=='\n')
-			s++;
-		if (*s=='#') {
-			char* t = strchr(s,'\n');
-			if (t) {
-				s = t;
+		while (ch == ' ' || ch=='\t' || ch=='\n')
+			nextChar();
+		if (ch=='#') {
+			while (ch != '\n' && ch != EOF)
+				nextChar();
+			if (ch == '\n') {
 				continue;
 			} else {
-				s += strlen(s);
 				break;
 			}
 		}
 		break;
 	}
-	if (!*s) {
+	if (feof(fp)) {
 		token.type = T_EOF;
 		return;
 	}
-	switch (*s) {
-	case ';': token.type = T_SEMI; s++; return;
-	case '(': token.type = T_LPAREN; s++; return;
-	case ')': token.type = T_RPAREN; s++; return;
+	switch (ch) {
+	case ';': token.type = T_SEMI; nextChar(); return;
+	case '(': token.type = T_LPAREN; nextChar(); return;
+	case ')': token.type = T_RPAREN; nextChar(); return;
 	}
-	char* t =s;
-	if (isalpha(*s)) {
-		while (isalnum(*t) || *t=='_' || *t=='\'')
-			++t;
+	char* t = malloc(128);
+	char* s = t;
+	if (isalpha(ch)) {
+		while (isalnum(ch) || ch=='_' || ch=='\'')
+		{
+			*t++ = ch;
+			nextChar();
+		}
+		*t++ = 0;
 		free(token.s);
-		token.s = NEWA(char, t-s+1);
-		memcpy(token.s, s, t-s);
-		token.s[t-s]=0;
+		token.s = strdup(s);
 		token.type = T_NAME;
-		s = t;
 		return;
 	}
-	if (isdigit(*t)) {
-		token.value = *t - '0';
-		++t;
-		while (isdigit(*t)) {
-			token.value = token.value*10 + *t-'0';
-			++t;
+	if (isdigit(ch)) {
+		token.value = ch - '0';
+		nextChar();
+		while (isdigit(ch)) {
+			token.value = token.value*10 + ch-'0';
+			nextChar();
 		}
 		token.type = T_NUM;
-		s = t;
 		return;
 	}
 
-	while (*t && !isalnum(*t) && *t!=';' &&*t !=')' && *t!='(' && *t!=' ' && *t!='\t' && *t!='\n' && *t!='#') {
-		++t;
+	while (ch && !isalnum(ch) && ch!=';' &&ch !=')' && ch!='(' && ch!=' ' && ch!='\t' && ch!='\n' && ch!='#') {
+		*t++ = ch;
+		nextChar();
 	}
+	*t = 0;
 	token.type = T_PUNCT;
 	switch (t-s) {
 	case 1: // 1-character sequence
@@ -208,11 +215,8 @@ void next() {
 	}
 	if (token.type == T_PUNCT) {
 		free(token.s);
-		token.s = NEWA(char, t-s+1);
-		memcpy(token.s, s, t-s);
-		token.s[t-s]=0;
+		token.s = strdup(s);
 	}
-	s = t;
 	return;
 }
 const char* token_to_string(const tkn* token) {
@@ -281,7 +285,7 @@ bool binop(Token t) {
 	}
 	return false;
 }
-bool postfix(tkn t) {
+bool postfix(Token t) {
 	return false; // don't have these yet.
 }
 int precedence(Token t) {
@@ -320,8 +324,8 @@ int rightPrec(Token t) {
 	}
 	return 1;
 }
-int nextPrec(tkn t) {
-	switch (t.type){
+int nextPrec(Token t) {
+	switch (t){
 	case T_OR:
 		return 1;
 	case T_AND:
@@ -347,16 +351,16 @@ expr_t* E(int p) {
 	}
 	int r = 8;
 	//printf("E(%d): %s binop %d postfix %d precedence() %d, p <=precedence() %d precedence() <= r %d r=%d\n", p, token_to_string(&token), binop(token.type), postfix(token), precedence(token.type), p <= precedence(token.type), precedence(token.type)<=r, r);
-	while ((binop(token.type) || postfix(token)) && ((p <= precedence(token.type)) && (precedence(token.type) <= r))) {
-		tkn b = token;
+	while ((binop(token.type) || postfix(token.type)) && ((p <= precedence(token.type)) && (precedence(token.type) <= r))) {
+		Token b = token.type;
 		next();
-		if (binop(b.type)) {
-			expr_t* t1 = E(rightPrec(b.type));
+		if (binop(b)) {
+			expr_t* t1 = E(rightPrec(b));
 			//printf("RHS expr: "); pprint_expr(0, t1);
-			t = mkapp(mkapp(mkop(b.type), t), t1);
+			t = mkapp(mkapp(mkop(b), t), t1);
 			//pprint_expr(0, t);
 		} else {
-			t = mkapp(mkop(b.type), t);
+			t = mkapp(mkop(b), t);
 		}
 		r = nextPrec(b);
 		//printf("E(%d): %s binop %d postfix %d precedence() %d, p <=precedence() %d precedence() <= r %d r=%d\n", p, token_to_string(&token), binop(token.type), postfix(token), precedence(token.type), p <= precedence(token.type), precedence(token.type)<=r, r);
@@ -374,7 +378,6 @@ result_t* parse_expr() {
 	 expr_t* e = E(0);
 	 result_t* r = NEW(result_t);
 	 r->data = e;
-	 r->s = NULL;
 	 return r;
 }
 list_t* parse_names(void) {
@@ -413,7 +416,6 @@ result_t *parse_def(void) {
 	next();
 
 	r = NEW(result_t);
-	r->s = s;
 	def_t *def = NEW(def_t);
 	def->name = rname->data;
 	def->args = rargs;
@@ -440,7 +442,6 @@ result_t *parse_defs()
 
     r = NEW(result_t);
     r->data = defs;
-    r->s = NULL;
 
     return r;
 }
@@ -1263,25 +1264,22 @@ void addMarkers(CodeArray* code, list_t* defs) {
 }
 int main(int argc, char** argv)
 {
-    char *buf = malloc(BUFSIZE);
-    FILE* fp;
-    size_t len;
     result_t *r;
 
-    // slurp all input
+    // Initialize input
     if (argc>1)
     {
     	fp = fopen(argv[1],"rt");
-    	len = fread(buf, 1, BUFSIZE-1, fp);
+		if (fp == NULL)
+			return -1;
     }
     else {
-    	len = fread(buf, 1, BUFSIZE-1, stdin);
+		fp = stdin;
     }
-   	buf[len] = 0;
 
-	s = buf;
+    nextChar();
 	next();
-    r = parse_defs(buf);
+    r = parse_defs();
 
     if(r == NULL) {
         fprintf(stderr, "no parse\n");
@@ -1329,7 +1327,11 @@ int main(int argc, char** argv)
 		printf("%d: %s\n", i, instructionToString(&code.code[i]));
     }
     AddressMode start_am;
-    find_mode(env, "main", &start_am);
+    if (!find_mode(env, "main", &start_am))
+    {
+		puts("main not found");
+		return 1;
+    }
     state.pc = start_am.params.address;
     struct Closure* ret = NEW(struct Closure);
     ret->pc = haltat;
