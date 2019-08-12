@@ -65,6 +65,7 @@ typedef enum {
     EXPR_STR,
     EXPR_NUM,
 	EXPR_OPER,
+	EXPR_LET
 } exprtag_t;
 
 typedef char *expr_var_t;
@@ -80,6 +81,15 @@ typedef int expr_num_t;
 
 typedef int expr_oper_t;
 
+typedef struct expr expr_t;
+typedef struct {
+	expr_var_t name;
+	const expr_t* expr;
+} expr_let_def;
+typedef struct {
+	list_t* let_defs;
+	const expr_t* let_value;
+} expr_let_t;
 typedef struct expr {
     exprtag_t tag;
     union {
@@ -88,6 +98,7 @@ typedef struct expr {
         expr_str_t str;
         expr_num_t num;
         expr_oper_t op;
+        expr_let_t letx;
     };
 } expr_t;
 
@@ -121,6 +132,8 @@ typedef enum {
 	T_SUB,
 	T_MUL,
 	T_DIV,
+	T_LET,
+	T_IN,
 	//T_IF,
 	T_EOF
 } Token;
@@ -173,6 +186,10 @@ void next() {
 		free(token.s);
 		token.s = strdup(s);
 		token.type = T_NAME;
+		if (strcmp(s, "let")==0)
+			token.type = T_LET;
+		else if (strcmp(s, "in")==0)
+			token.type = T_IN;
 		return;
 	}
 	if (isdigit(ch)) {
@@ -233,11 +250,13 @@ const char* token_to_string(const tkn* token) {
 	case T_SUB: snprintf(buf, 50, "T_SUB"); break;
 	case T_ADD: snprintf(buf, 50, "T_ADD"); break;
 	case T_DIV: snprintf(buf, 50, "T_DIV"); break;
+	case T_IN: snprintf(buf, 50, "T_IN"); break;
+	case T_LET: snprintf(buf, 50, "T_LET"); break;
 	default: snprintf(buf, 50, "%d", token->type); break;
 	}
 	return buf;
 }
-result_t *parse_expr();
+expr_t *parse_expr();
 
 void pprint_expr(int col, const expr_t *e);
 expr_t* mkleaf(tkn t) {
@@ -374,11 +393,38 @@ expr_t* P(void) {
 	else if (atom(token)) { expr_t* t = mkleaf(token); next(); return t; }
 	else exit(1);
 }
-result_t* parse_expr() {
-	 expr_t* e = E(0);
-	 result_t* r = NEW(result_t);
-	 r->data = e;
-	 return r;
+expr_t* parse_expr() {
+	 return E(0);
+}
+list_t* parse_let_exprs()
+{
+	list_t* exs = NULL;
+	next();
+	while (token.type == T_NAME)
+	{
+		char* id = strdup(token.s);
+		next();
+		assert(token.type == T_EQUALS);
+		next();
+		expr_t* val = parse_expr();
+		assert(token.type == T_IN || token.type == T_SEMI);
+		if (token.type == T_SEMI)
+			next();
+		expr_let_def* def = NEW(expr_let_def);
+		def->name = id;
+		def->expr = val;
+		exs = cons(def, exs);
+	}
+	assert(token.type == T_IN);
+	next();
+	return exs;
+}
+expr_t* parse_let() {
+	expr_t* letx = NEW(expr_t);
+	letx->tag = EXPR_LET;
+	letx->letx.let_defs = parse_let_exprs();
+	letx->letx.let_value = parse_expr();
+	return letx;
 }
 list_t* parse_names(void) {
 	list_t* names = NULL;
@@ -394,7 +440,7 @@ result_t *parse_def(void) {
 	result_t *r = NULL;
 	result_t *rname = NULL;
 	list_t* rargs = NULL;
-	result_t *rrhs = NULL;
+	expr_t *rrhs = NULL;
 
 	if (token.type != T_NAME)
 		return NULL;
@@ -408,7 +454,10 @@ result_t *parse_def(void) {
 	assert(token.type == T_EQUALS);
 	next();
 
-	rrhs = parse_expr();
+	if (token.type == T_LET)
+		rrhs = parse_let();
+	else
+		rrhs = parse_expr();
 
 	if (!rrhs)
 		return NULL;
@@ -419,7 +468,7 @@ result_t *parse_def(void) {
 	def_t *def = NEW(def_t);
 	def->name = rname->data;
 	def->args = rargs;
-	def->rhs = rrhs->data;
+	def->rhs = rrhs;
 	r->data = def;
 
 	return r;
@@ -456,6 +505,7 @@ void indent(int col)
 
 void pprint_expr(int col, const expr_t *e)
 {
+	const list_t* p;
     switch(e->tag) {
     case EXPR_VAR:
         printf("VAR %s\n", e->var);
@@ -476,6 +526,27 @@ void pprint_expr(int col, const expr_t *e)
 		tkn t;
 		t.type = e->op;
 		printf("OPER %s\n", token_to_string(&t));
+		break;
+	}
+	case EXPR_LET: {
+		printf("LET\n");
+		for (p = e->letx.let_defs; p; p=p->next)
+		{
+			expr_let_def* def = p->data;
+			indent(col);
+			if (def)
+			{
+				printf("%s=",def->name);
+				pprint_expr(col+4,def->expr);
+			}
+			else
+				printf("-\n");
+
+		}
+		indent(col);
+		printf("IN ");
+		//indent(col+4);
+		pprint_expr(col+4, e->letx.let_value);
 		break;
 	}
     default:
@@ -813,6 +884,10 @@ CodeArray* compileRExp(CodeArray* code, const expr_t* exp, list_t* env) {
 	}
 	case EXPR_STR: {
 		puts("EXPR_STR in COMPILE_R_EXP");
+		exit(1);
+	}
+	case EXPR_LET: {
+		puts("EXPR_LET in COMPILE_R_EXP");
 		exit(1);
 	}
 	}
