@@ -632,15 +632,6 @@ void pushInstruction(CodeArray* code, AddressMode mode) {
 	//n.addr.arg = mode.params.arg;
 	addInstruction(code, n);
 }
-#if 0
-static
-void pushArgInstruction(CodeArray* code, unsigned arg) {
-	AddressMode mode;
-	mode.mode = Arg;
-	mode.params.arg = arg;
-	pushInstruction(code, mode);
-}
-#endif
 static
 void pushLabelInstruction(CodeArray* code, ptrdiff_t label) {
 	Instruction n;
@@ -649,32 +640,6 @@ void pushLabelInstruction(CodeArray* code, ptrdiff_t label) {
 	n.addr.params.address = label;
 	addInstruction(code, n);
 }
-#if 0
-static
-void pushSuperInstruction(CodeArray* code, ptrdiff_t label) {
-	Instruction n;
-	n.ins = Push;
-	n.addr.mode = Super;
-	n.addr.params.address = label;
-	addInstruction(code, n);
-}
-static
-void pushNumInstruction(CodeArray* code, ptrdiff_t num) {
-	Instruction n;
-	n.ins = Push;
-	n.addr.mode = Num;
-	n.addr.params.address = num;
-	addInstruction(code, n);
-}
-static
-void pushCodeInstruction(CodeArray* code, CodeArray* dest) {
-	Instruction n;
-	n.ins = Push;
-	n.addr.mode = List;
-	n.addr.params.code = dest;
-	addInstruction(code, n);
-}
-#endif
 static
 void enterInstruction(CodeArray* code, AddressMode mode) {
 	Instruction n;
@@ -689,24 +654,6 @@ void enterArgInstruction(CodeArray* code, unsigned arg) {
 	mode.params.arg = arg;
 	enterInstruction(code, mode);
 }
-#if 0
-static
-void enterLabelInstruction(CodeArray* code, ptrdiff_t label) {
-	Instruction n;
-	n.ins = Enter;
-	n.addr.mode = Label;
-	n.addr.params.address = label;
-	addInstruction(code, n);
-}
-static
-void enterSuperInstruction(CodeArray* code, ptrdiff_t label) {
-	Instruction n;
-	n.ins = Enter;
-	n.addr.mode = Super;
-	n.addr.params.address = label;
-	addInstruction(code, n);
-}
-#endif
 static
 void enterNumInstruction(CodeArray* code, ptrdiff_t num) {
 	Instruction n;
@@ -734,16 +681,6 @@ struct env_t {
 	int args;
 	AddressMode mode;
 };
-#if 0
-static
-void pprint_env(list_t* env) {
-	for (; env; env = env->next) {
-		struct env_t* entry = env->data;
-		printf("env %p entry %p", env, entry); fflush(stdout);
-		printf(" %s args %d mode %s\n", entry->name, entry->args, amToString(entry->mode.mode));
-	}
-}
-#endif
 static
 list_t* envAddArgs(list_t* env, const list_t* args) {
 	int kArg = 0;
