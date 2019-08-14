@@ -791,31 +791,44 @@ bool find_mode(list_t* env, expr_var_t var, AddressMode* mode) {
 	return false;
 }
 
+typedef struct {
+	CodeArray* code;
+	int d;
+} code_regs_t;
+typedef struct {
+	AddressMode am;
+	int d;
+} LetAddressMode;
 static
-AddressMode compileAExp(const expr_t* exp, list_t* env);
+LetAddressMode compileAExp(const expr_t* exp, int d, list_t* env);
 static
-CodeArray* compileRExp(CodeArray* code, const expr_t* exp, list_t* env);
+code_regs_t compileRExp(code_regs_t code, int d, const expr_t* exp, list_t* env);
 static
-AddressMode compileAExp(const expr_t* exp, list_t* env) {
-	AddressMode m;
+LetAddressMode compileAExp(const expr_t* exp, int d, list_t* env) {
+	LetAddressMode m;
 	switch (exp->tag) {
 	default: {
 		//return compileAApp(exp->app, env);
-		CodeArray* code = NEW(CodeArray); code->code=0; code->code_capy=0; code->code_size=0;
-		code = compileRExp(code, exp, env);
-		m.mode = List;
-		m.params.code = code;
+		code_regs_t code;
+		code.d = 0;
+		code.code = NEW(CodeArray); code.code->code=0; code.code->code_capy=0; code.code->code_size=0;
+		code = compileRExp(code, d, exp, env);
+		m.am.mode = List;
+		m.am.params.code = code.code;
+		m.d = code.d;
 		break;
 	}
 	case EXPR_NUM: {
-		m.mode = Num;
-		m.params.address = exp->num;
+		m.am.mode = Num;
+		m.am.params.address = exp->num;
+		m.d = d;
 		break;
 	}
 	case EXPR_VAR: {
-		if (!find_mode(env, exp->var, &m)) {
-			m.mode = Super;
-			m.params.address = 9999;
+		if (!find_mode(env, exp->var, &m.am)) {
+			m.am.mode = Super;
+			m.am.params.address = 9999;
+			m.d = d;
 		}
 		break;
 	}
@@ -823,30 +836,32 @@ AddressMode compileAExp(const expr_t* exp, list_t* env) {
 	return m;
 }
 static
-CodeArray* compileRVar(CodeArray* code, expr_var_t var, list_t* env) {
+code_regs_t compileRVar(code_regs_t code, int d, expr_var_t var, list_t* env) {
 	AddressMode mode;
 	if (!find_mode(env, var, &mode)) {
 		printf("Missing definition of a variable %s\n", var);
 		mode.mode = Super;
 		mode.params.address = 9999;
 	}
-	enterInstruction(code, mode);
+	enterInstruction(code.code, mode);
+	code.d = d;
 	return code;
 }
 static
-CodeArray* compileRNum(CodeArray* code, expr_num_t num, list_t* env) {
-	enterNumInstruction(code, num);
+code_regs_t compileRNum(code_regs_t code, int d, expr_num_t num, list_t* env) {
+	enterNumInstruction(code.code, num);
+	code.d = d;
 	return code;
 }
 static
-CodeArray* compileRApp(CodeArray* code, expr_app_t app, list_t* env) {
+code_regs_t compileRApp(code_regs_t code, int d, expr_app_t app, list_t* env) {
 	// compileR (EAp e1 e2) env = Push (compileA e2 env) : compileR e1 env
-	AddressMode toPush = compileAExp(app.arg, env);
-	pushInstruction(code, toPush);
-	return compileRExp(code, app.fun, env);
+	LetAddressMode toPush = compileAExp(app.arg, d, env);
+	pushInstruction(code.code, toPush.am);
+	return compileRExp(code, toPush.d, app.fun, env);
 }
 static
-CodeArray* compileROper(CodeArray* code, const expr_oper_t op, list_t* env) {
+code_regs_t compileROper(code_regs_t code, int d, const expr_oper_t op, list_t* env) {
 	AddressMode mode;
 	bool found;
 	switch (op) {
@@ -863,24 +878,31 @@ CodeArray* compileROper(CodeArray* code, const expr_oper_t op, list_t* env) {
 		mode.mode = Super;
 		mode.params.address = 9999;
 	}
-	enterInstruction(code, mode);
+	enterInstruction(code.code, mode);
+	code.d = d;
 	return code;
 }
 static
-CodeArray* compileRExp(CodeArray* code, const expr_t* exp, list_t* env) {
+code_regs_t compileRLet(code_regs_t code, int d, const expr_let_t exp, list_t* env) {
+	LetAddressMode modes[length(exp.let_defs)];
+    haltInstruction(code.code);
+	return code;
+}
+static
+code_regs_t compileRExp(code_regs_t code, int d, const expr_t* exp, list_t* env) {
 	switch (exp->tag)
 	{
 	case EXPR_APP: {
-		return compileRApp(code, exp->app, env);
+		return compileRApp(code, d, exp->app, env);
 	}
 	case EXPR_NUM: {
-		return compileRNum(code, exp->num, env);
+		return compileRNum(code, d, exp->num, env);
 	}
 	case EXPR_VAR: {
-		return compileRVar(code, exp->var, env);
+		return compileRVar(code, d, exp->var, env);
 	}
 	case EXPR_OPER: {
-		return compileROper(code, exp->op, env);
+		return compileROper(code, d, exp->op, env);
 	}
 	case EXPR_STR: {
 		puts("EXPR_STR in COMPILE_R_EXP");
@@ -888,6 +910,7 @@ CodeArray* compileRExp(CodeArray* code, const expr_t* exp, list_t* env) {
 	}
 	case EXPR_LET: {
 		puts("EXPR_LET in COMPILE_R_EXP");
+		return compileRLet(code, d, exp->letx, env);
 		exit(1);
 	}
 	}
@@ -908,7 +931,8 @@ CodeArray* compileDef(CodeArray* code, def_t* def, list_t* env) {
 	}
 	list_t* new_env = envDup(env);
 	new_env = envAddArgs(new_env, def->args);
-	compileRExp(code, def->rhs, new_env);
+	code_regs_t cr; cr.code = code; cr.d = 0;
+	compileRExp(cr, 0, def->rhs, new_env);
 	for (int i=0; i<code->code_size; ++i) {
 		switch (code->code[i].ins) {
 		default:
