@@ -7,6 +7,6 @@ of the instructions.
 
 The point of this is more just to guide the development of the fpa project than to be used by itself.
 
-Under way: Adding a let form. We'll follow the method of Peyton-Jones and Lester which uses a special Move instruction
+Added a let form. Used the method of Peyton-Jones and Lester which uses a special Move instruction
 to initialize a closure with the value of a let-bound variable.
 
