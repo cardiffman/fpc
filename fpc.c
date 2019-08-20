@@ -573,7 +573,7 @@ void pprint_defs(int col, const list_t *defs)
 }
 
 typedef enum InstructionType {
-	Halt, Take, Push, Enter, EnterT, Op, CheckMarkers
+	Halt, Take, Push, Enter, EnterT, Op, CheckMarkers, Move
 } InstructionType;
 const char* insToString(InstructionType ins) {
 	switch (ins) {
@@ -584,6 +584,7 @@ const char* insToString(InstructionType ins) {
 	case EnterT: return "EnterT";
 	case Op: return "Op";
 	case CheckMarkers: return "CheckMarkers";
+	case Move: return "Move";
 	}
 	return "inxxx";
 }
@@ -624,20 +625,21 @@ typedef struct {
 	} params;
 } AddressMode;
 typedef struct Instruction {
-	InstructionType ins:3;//unsigned ins:3;
+	InstructionType ins;//ins:3;//unsigned ins:3;
 	union {
 		AddressMode addr;
-		unsigned take;
 		OpType op;
 	};
+	unsigned take;
+	unsigned frameSize;
 } Instruction;
 const char* instructionToString(Instruction* ins) {
 	static char text[50];
 	text[0] = 0;
 	switch (ins->ins) {
 	case Halt: return insToString(ins->ins);
-	case CheckMarkers:
-	case Take: snprintf(text, 50, "%s %d", insToString(ins->ins), ins->take); break;
+	case CheckMarkers: snprintf(text, 50, "%s %d", insToString(ins->ins), ins->take); break;
+	case Take: snprintf(text, 50, "%s %d %d", insToString(ins->ins), ins->take, ins->frameSize); break;
 	case Push:
 	case Enter:
 	case EnterT:
@@ -651,6 +653,16 @@ const char* instructionToString(Instruction* ins) {
 		}
 		break;
 	case Op: snprintf(text, 50, "%s %s", insToString(ins->ins), opToString(ins->op)); break;
+	case Move:
+		switch (ins->addr.mode) {
+		case Arg: snprintf(text, 50, "%s %s %d %d", insToString(ins->ins), amToString(ins->addr.mode), ins->addr.params.arg, ins->take); break;
+		case Label: snprintf(text, 50, "%s %s %ld %d", insToString(ins->ins), amToString(ins->addr.mode), ins->addr.params.address, ins->take); break;
+		case Super: snprintf(text, 50, "%s %s %ld %d", insToString(ins->ins), amToString(ins->addr.mode), ins->addr.params.address, ins->take); break;
+		case Num: snprintf(text, 50, "%s %s %ld %d", insToString(ins->ins), amToString(ins->addr.mode), ins->addr.params.address, ins->take); break;
+		case List: snprintf(text, 50, "%s %s %ld %d", insToString(ins->ins), amToString(ins->addr.mode), ins->addr.params.address, ins->take); break;
+		case Marker: snprintf(text, 50, "%s %s %d %d", insToString(ins->ins), amToString(ins->addr.mode), ins->addr.params.arg, ins->take); break;
+		}
+		break;
 	}
 	return text;
 }
@@ -688,10 +700,11 @@ void checkMarkersInstruction(CodeArray* code, unsigned take) {
 	addInstruction(code, n);
 }
 static
-void takeInstruction(CodeArray* code, unsigned take) {
+void takeInstruction(CodeArray* code, unsigned take, unsigned frame) {
 	Instruction n;
 	n.ins = Take;
 	n.take = take;
+	n.frameSize = frame;
 	addInstruction(code, n);
 }
 static
@@ -768,6 +781,15 @@ list_t* envAddArgs(list_t* env, const list_t* args) {
 	return env;
 }
 static
+list_t* envAddVar(list_t* env, const char* name, AddressMode mode) {
+	struct env_t* entry = NEW(struct env_t);
+	entry->name = name;
+	entry->mode = mode;
+	env = cons(entry, env);
+    //printf("%s ", __FUNCTION__); pprint_env(env);
+	return env;
+}
+static
 list_t* envDup(list_t* env) {
 	list_t* dup = NULL;
 	for (; env; env = env->next) {
@@ -833,6 +855,7 @@ LetAddressMode compileAExp(const expr_t* exp, int d, list_t* env) {
 		break;
 	}
 	}
+	printf("%s: mode %s\n", __FUNCTION__, amToString(m.am.mode));
 	return m;
 }
 static
@@ -885,7 +908,31 @@ code_regs_t compileROper(code_regs_t code, int d, const expr_oper_t op, list_t* 
 static
 code_regs_t compileRLet(code_regs_t code, int d, const expr_let_t exp, list_t* env) {
 	LetAddressMode modes[length(exp.let_defs)];
-    haltInstruction(code.code);
+	int vars = length(exp.let_defs);
+	list_t* def = exp.let_defs;
+	int slot = 0;
+	list_t* innerEnv = envDup(env);
+	for (; def; def = def->next)
+	{
+		expr_let_def* let_st = def->data;
+		LetAddressMode am = compileAExp(let_st->expr, d+vars, env);
+		printf("Slot %d address mode %s\n", slot, amToString(am.am.mode));
+		Instruction inst;
+		inst.ins = Move;
+		inst.addr = am.am;
+		inst.take = slot+vars;
+		innerEnv = envAddVar(innerEnv, let_st->name, inst.addr);
+		printf("Slot %d address mode %s\n", slot, amToString(inst.addr.mode));
+		printf("Slot %d instruction %s\n", slot, instructionToString(&inst));
+
+		addInstruction(code.code, inst);
+		slot++;
+	}
+
+	printf("Compiling inner expression at %ld\n", code.code->code_size);
+	compileRExp(code, d+vars, exp.let_value, innerEnv);
+	code.d = d+vars;
+    //haltInstruction(code.code);
 	return code;
 }
 static
@@ -917,28 +964,67 @@ code_regs_t compileRExp(code_regs_t code, int d, const expr_t* exp, list_t* env)
 	return code;
 }
 static
+unsigned countLocalsExp(const expr_t* exp)
+{
+	switch (exp->tag)
+	{
+	case EXPR_APP: {
+		return 0;// FIXME compileRApp(code, d, exp->app, env);
+	}
+	case EXPR_NUM: {
+		return 0;
+	}
+	case EXPR_VAR: {
+		return 0;
+	}
+	case EXPR_OPER: {
+		return 0;
+	}
+	case EXPR_STR: {
+		return 0;
+	}
+	case EXPR_LET: {
+		unsigned vars = length(exp->letx.let_defs) + countLocalsExp(exp->letx.let_value);
+		return vars;
+	}
+	}
+	return 9999;
+}
+static
+unsigned countLocals(def_t* def)
+{
+	return countLocalsExp(def->rhs);
+}
+static
 CodeArray* compileDef(CodeArray* code, def_t* def, list_t* env) {
 	//def->args;
 	//def->name;
 	//def->rhs; // expr_t
 	unsigned nArgs = length(def->args);
-	if (nArgs) {
-		for (unsigned i=0; i<nArgs-1; ++i) {
-			pushLabelInstruction(code, 2*(nArgs-i));
+	unsigned nLocals = countLocals(def);
+	int takeAddr = -1;
+	if (nArgs + nLocals) {
+		if (nArgs) {
+			for (unsigned i=0; i<nArgs-1; ++i) {
+				pushLabelInstruction(code, 2*(nArgs-i));
+			}
 		}
 		checkMarkersInstruction(code, nArgs);
-		takeInstruction(code, nArgs);
+		takeAddr = code->code_size;
+		takeInstruction(code, nArgs, nArgs+nLocals);
 	}
 	list_t* new_env = envDup(env);
 	new_env = envAddArgs(new_env, def->args);
 	code_regs_t cr; cr.code = code; cr.d = 0;
-	compileRExp(cr, 0, def->rhs, new_env);
+	code_regs_t cr2 = compileRExp(cr, 0, def->rhs, new_env);
+	code->code[takeAddr].frameSize = nArgs + cr2.d;
 	for (int i=0; i<code->code_size; ++i) {
 		switch (code->code[i].ins) {
 		default:
 			break;
 		case Enter:
 		case Push:
+		case Move:
 			if (code->code[i].addr.mode == List) {
 				printf("Found a List at %d appending it at %d\n", i, code->code_size);
 				// Capture the code that needs to be appended to the linear sequence
@@ -1202,6 +1288,57 @@ void stepCheckMarkers(const Instruction* ins) {
 		}
 	}
 }
+void stepMove(Instruction* ins) {
+	// This is very much stepPush but with a slightly
+	// different way of disposing of 'toPush'
+	struct Closure* toMove = NULL;
+	switch (ins->addr.mode) {
+	case Num:
+		toMove = NEW(struct Closure);
+		toMove->value = ins->addr.params.address;
+		toMove->pc = SELF;
+		break;
+	case Arg:
+		if (state.frame == 0)
+		{
+			assert(!"Frame should not be NULL when pushing arg");
+		}
+		toMove = NEW(struct Closure);
+		*toMove = state.frame[ins->addr.params.arg];
+		break;
+	case Label:
+		if (state.frame == 0)
+		{
+			//assert(!"Frame should not be NULL when pushing label");
+			// frame can be zero if main just returns an expression with no
+			// lazy supercombinator called.
+			// A heuristic could be, if a Take has ever been done,
+			// there should be a frame available for a push-label.
+			// Prior to a take, there would never be a frame.
+		}
+		toMove = NEW(struct Closure);
+		toMove->pc = ins->addr.params.address;
+		toMove->frame = state.frame;
+		break;
+	case Super:
+		toMove = NEW(struct Closure);
+		toMove->pc = ins->addr.params.address;
+		toMove->frame = NULL;
+		break;
+	case Marker:
+		if (state.frame == 0)
+		{
+			assert(!"Frame should not be NULL when pushing marker");
+		}
+		toMove = NEW(struct Closure);
+		toMove->pc = MARKER_PC - ins->addr.params.arg;
+		toMove->frame = state.frame;
+		break;
+	default:
+		puts("Invalid push instruction"); exit(1); break;
+	}
+	state.frame[ins->take] = *toMove;
+}
 void step(CodeArray* code) {
 	//if (state.pc < 0)
 	//	return; // We don't run SELF or MARKER yet.
@@ -1229,6 +1366,9 @@ void step(CodeArray* code) {
 	case Op:
 		stepOp(&code->code[old_pc]);
 		break;
+	case Move:
+		stepMove(&code->code[old_pc]);
+		break;
 	}
 	if (state.pc == SELF) {
 		struct Closure* mark = head(stack);
@@ -1250,7 +1390,7 @@ void step(CodeArray* code) {
 }
 void addOpCombinator(CodeArray* code, OpType op, const char* name, list_t** env) {
 	unsigned res = code->code_size;
-	takeInstruction(code, 2);
+	takeInstruction(code, 2, 2);
 	pushLabelInstruction(code, res+3);
 	enterArgInstruction(code, 1);
 	pushLabelInstruction(code, res+5);
@@ -1265,7 +1405,7 @@ void addOpCombinator(CodeArray* code, OpType op, const char* name, list_t** env)
 }
 void addCondCombinator(CodeArray* code, list_t** env) {
 	unsigned res = code->code_size;
-	takeInstruction(code, 3);
+	takeInstruction(code, 3, 3);
 	pushLabelInstruction(code,res+3);
 	enterArgInstruction(code, 0);
 	AddressMode am;
