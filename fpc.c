@@ -305,6 +305,7 @@ bool binop(Token t) {
 	return false;
 }
 bool postfix(Token t) {
+	(void)t;
 	return false; // don't have these yet.
 }
 int precedence(Token t) {
@@ -682,7 +683,7 @@ void addInstruction(CodeArray* code, Instruction n) {
 static
 void append(CodeArray* code, CodeArray* target) {
 	// Amenable to an obvious optimization in the future.
-	for (int i=0; i<target->code_size; ++i) {
+	for (unsigned i=0; i<target->code_size; ++i) {
 		addInstruction(code, target->code[i]);
 	}
 }
@@ -872,6 +873,7 @@ code_regs_t compileRVar(code_regs_t code, int d, expr_var_t var, list_t* env) {
 }
 static
 code_regs_t compileRNum(code_regs_t code, int d, expr_num_t num, list_t* env) {
+	(void)env;
 	enterNumInstruction(code.code, num);
 	code.d = d;
 	return code;
@@ -907,7 +909,7 @@ code_regs_t compileROper(code_regs_t code, int d, const expr_oper_t op, list_t* 
 }
 static
 code_regs_t compileRLet(code_regs_t code, int d, const expr_let_t exp, list_t* env) {
-	LetAddressMode modes[length(exp.let_defs)];
+	//LetAddressMode modes[length(exp.let_defs)];
 	int vars = length(exp.let_defs);
 	list_t* def = exp.let_defs;
 	int slot = 0;
@@ -929,7 +931,7 @@ code_regs_t compileRLet(code_regs_t code, int d, const expr_let_t exp, list_t* e
 		slot++;
 	}
 
-	printf("Compiling inner expression at %ld\n", code.code->code_size);
+	printf("Compiling inner expression at %u\n", code.code->code_size);
 	compileRExp(code, d+vars, exp.let_value, innerEnv);
 	code.d = d+vars;
     //haltInstruction(code.code);
@@ -1018,7 +1020,7 @@ CodeArray* compileDef(CodeArray* code, def_t* def, list_t* env) {
 	code_regs_t cr; cr.code = code; cr.d = 0;
 	code_regs_t cr2 = compileRExp(cr, 0, def->rhs, new_env);
 	code->code[takeAddr].frameSize = nArgs + cr2.d;
-	for (int i=0; i<code->code_size; ++i) {
+	for (unsigned i=0; i<code->code_size; ++i) {
 		switch (code->code[i].ins) {
 		default:
 			break;
@@ -1083,7 +1085,7 @@ void showSomeFrame(struct Closure* frame) {
 void showMainFrameElts(int elts) {
 	if (state.pc == SELF)
 	{
-		printf("%s|%p\n", pcToString(state.pc), state.value);
+		printf("%s|%lx\n", pcToString(state.pc), state.value);
 	}
 	else
 	{
@@ -1106,7 +1108,7 @@ void printStack()
 }
 void stepTake(const Instruction* ins) {
 	state.frame = NEWA(struct Closure, ins->take);
-	for (int i=0; i<ins->take; ++i) {
+	for (unsigned i=0; i<ins->take; ++i) {
 		state.frame[i] = *(struct Closure*)head(stack);
 		stack = tail(stack);
 	}
@@ -1164,7 +1166,7 @@ void stepPush(const Instruction* ins) {
 }
 void stepEnter(const Instruction* ins) {
 	struct Closure* closure;
-	struct Closure* toPush;
+	//struct Closure* toPush;
 	struct Closure* arg;
 	switch (ins->addr.mode) {
 	case Num:
@@ -1173,7 +1175,7 @@ void stepEnter(const Instruction* ins) {
 		showMainFrame();
 		break;
 	case Arg:
-		printf("Entering Arg %ld: %s\n", ins->addr.params.arg, pcToString(state.frame[ins->addr.params.arg].pc));
+		printf("Entering Arg %u: %s\n", ins->addr.params.arg, pcToString(state.frame[ins->addr.params.arg].pc));
 		showMainFrame();
 		arg = &state.frame[ins->addr.params.arg];
 		if (arg->pc == SELF)
@@ -1248,13 +1250,13 @@ void stepCheckMarkers(const Instruction* ins) {
 	unsigned stack_check_length = length(stack);
 	list_t* checkStack = stack;
 	struct Closure* check = head(checkStack); checkStack=tail(checkStack);
-	for (int m=0; m<ins->take; ++m) {
+	for (unsigned m=0; m<ins->take; ++m) {
 		if (check->pc <= MARKER_PC) {
 			printf("checkmarkers %d: Found %s in arg %d\n", ins->take, pcToString(check->pc), m);
 			ptrdiff_t slot = MARKER_PC - check->pc;
 			if (m > 0) {
 				struct Closure* newFrame = NEWA(struct Closure, m);
-				for (int i=0; i<m-1; ++i) {
+				for (unsigned i=0; i<m-1; ++i) {
 					newFrame[i] = *(struct Closure*)head(stack); stack=tail(stack);
 				}
 				check->frame[slot].frame = newFrame;
@@ -1499,7 +1501,7 @@ int main(int argc, char** argv)
     }
     unsigned haltat = code.code_size;
     haltInstruction(&code);
-    for (int i=0; i<code.code_size; ++i) {
+    for (unsigned i=0; i<code.code_size; ++i) {
 		printf("%d: %s\n", i, instructionToString(&code.code[i]));
     }
     AddressMode start_am;

@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.6)
-project (fpc,cxx)
+project (fpc C CXX)
+
+add_compile_options(-Wall -Wextra)
 
 add_executable(fpc fpc.c)
 
