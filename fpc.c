@@ -578,7 +578,7 @@ void pprint_defs(int col, const list_t *defs)
 }
 
 typedef enum InstructionType {
-	Halt, Take, Push, Enter, EnterT, Op, CheckMarkers, Move
+	Halt, Take, Push, Enter, EnterT, Op, CheckMarkers, Move, PutChar
 } InstructionType;
 const char* insToString(InstructionType ins) {
 	switch (ins) {
@@ -590,6 +590,7 @@ const char* insToString(InstructionType ins) {
 	case Op: return "Op";
 	case CheckMarkers: return "CheckMarkers";
 	case Move: return "Move";
+	case PutChar: return "PutChar";
 	}
 	return "inxxx";
 }
@@ -659,6 +660,7 @@ const char* instructionToString(Instruction* ins) {
 		}
 		break;
 	case Op: snprintf(text, 50, "%s %s", insToString(ins->ins), opToString(ins->op)); break;
+	case PutChar: snprintf(text, 50, "%s", insToString(ins->ins)); break;
 	case Move:
 		switch (ins->addr.mode) {
 		case Arg: snprintf(text, 50, "%s %s %d %d", insToString(ins->ins), amToString(ins->addr.mode), ins->addr.params.arg, ins->take); break;
@@ -1301,6 +1303,13 @@ void stepOp(const Instruction* ins) {
 	case Lt:  state.value = leftC->value < rightC->value; break;
 	}
 }
+void stepPutChar(const Instruction* ins) {
+	(void)ins;
+	struct Closure* leftC = head(stack); stack=tail(stack);
+	putchar(leftC->value);
+	state.value = leftC->value;
+	state.pc = SELF;
+}
 void stepCheckMarkers(const Instruction* ins) {
 	list_t* checkStack = stack;
 	unsigned iStack=0;
@@ -1415,6 +1424,11 @@ void step(CodeArray* code) {
 	case Move:
 		stepMove(&code->code[old_pc]);
 		break;
+	case PutChar:
+		stepPutChar(&code->code[old_pc]);
+		break;
+	default:
+		break;
 	}
 	if (state.pc == SELF) {
 		struct Closure* mark = head(stack);
@@ -1444,6 +1458,25 @@ void addOpCombinator(CodeArray* code, OpType op, const char* name, list_t** env)
 	opInstruction(code, op);
 	struct env_t* entry = NEW(struct env_t);
 	entry->args = 2;
+	entry->mode.mode = Super;
+	entry->mode.params.address = res;
+	entry->name = name;
+	*env = cons(entry, *env);
+}
+void addCcCombinator(CodeArray* code, InstructionType ins, const char* name, list_t** env) {
+	unsigned res = code->code_size;
+	takeInstruction(code, 1, 1);
+	pushLabelInstruction(code, res+3);
+	//AddressMode arg0;
+	//arg0.mode = Arg;
+	//arg0.params.arg = 0;
+	//pushInstruction(code, arg0);
+	enterArgInstruction(code, 0);
+	Instruction instr;
+	instr.ins = ins;
+	addInstruction(code, instr);//opInstruction(code, op);
+	struct env_t* entry = NEW(struct env_t);
+	entry->args = 1;
 	entry->mode.mode = Super;
 	entry->mode.params.address = res;
 	entry->name = name;
@@ -1519,6 +1552,7 @@ int main(int argc, char** argv)
     addOpCombinator(&code, Div, "/", &env);
     addOpCombinator(&code, Mod, "%", &env);
     addOpCombinator(&code, Lt,  "<", &env);
+    addCcCombinator(&code, PutChar,  "putChar", &env);
     addCondCombinator(&code, &env);
     list_t* pdef;
     for (pdef = defs; pdef; pdef=pdef->next) {
