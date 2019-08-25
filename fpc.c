@@ -864,6 +864,33 @@ LetAddressMode compileAExp(const expr_t* exp, int d, list_t* env) {
 	printf("%s: mode %s\n", __FUNCTION__, amToString(m.am.mode));
 	return m;
 }
+typedef struct {
+	const char* name;
+	ptrdiff_t ref;
+} forward_t;
+list_t* forwards = 0;
+void fixForwardReferences(CodeArray* code, list_t* env) {
+	for (list_t* forwardP = forwards; forwardP != NULL; forwardP = forwardP->next) {
+		forward_t* forward = forwardP->data;
+		AddressMode mode;
+		if (!find_mode(env, forward->name, &mode)) {
+			printf("Definition of %s still missing\n", forward->name);
+		} else {
+			if (code->code[forward->ref].addr.params.address == 9999) {
+				printf("Found %s %ld fixing %ld\n", forward->name, mode.params.address, forward->ref);
+				code->code[forward->ref].addr.params.address = mode.params.address;
+			}
+		}
+	}
+}
+void adjustForwardReferences(CodeArray* code, ptrdiff_t newStart) {
+	for (list_t* forwardP = forwards; forwardP != NULL; forwardP = forwardP->next) {
+		forward_t* forward = forwardP->data;
+		if (forward->ref < code->code_size) {
+			forward->ref += newStart;
+		}
+	}
+}
 static
 code_regs_t compileRVar(code_regs_t code, int d, expr_var_t var, list_t* env) {
 	AddressMode mode;
@@ -871,6 +898,10 @@ code_regs_t compileRVar(code_regs_t code, int d, expr_var_t var, list_t* env) {
 		printf("Missing definition of a variable %s\n", var);
 		mode.mode = Super;
 		mode.params.address = 9999;
+		forward_t* forward = NEW(forward_t);
+		forward->name = strdup(var);
+		forward->ref = code.code->code_size;
+		forwards = cons(forward, forwards);
 	}
 	enterInstruction(code.code, mode);
 	code.d = d;
@@ -1025,6 +1056,7 @@ CodeArray* compileDef(CodeArray* code, def_t* def, list_t* env) {
 	new_env = envAddArgs(new_env, def->args);
 	code_regs_t cr; cr.code = code; cr.d = 0;
 	code_regs_t cr2 = compileRExp(cr, 0, def->rhs, new_env);
+	printf("%s args %d original locals %d locals now %d\n", def->name, nArgs, nLocals, cr2.d);
 	code->code[takeAddr].frameSize = nArgs + cr2.d;
 	for (unsigned i=0; i<code->code_size; ++i) {
 		switch (code->code[i].ins) {
@@ -1037,9 +1069,11 @@ CodeArray* compileDef(CodeArray* code, def_t* def, list_t* env) {
 				printf("Found a List at %d appending it at %d\n", i, code->code_size);
 				// Capture the code that needs to be appended to the linear sequence
 				CodeArray* target = code->code[i].addr.params.code;
+				adjustForwardReferences(target, code->code_size);
 				// Convert the current instruction to a jump to the appended code.
 				code->code[i].addr.mode = Label;
 				code->code[i].addr.params.address = code->code_size;
+				//fixForwardReferences(target, new_env);
 				append(code, target);
 			}
 			break;
@@ -1500,6 +1534,11 @@ int main(int argc, char** argv)
 			entry->mode.params.address = code.code_size + (entry->args-1);
 		env = cons(entry, env);
 		compileDef(&code, def, env);
+    }
+    fixForwardReferences(&code, env); // Go back and fix the forward references
+    for (pdef = defs; pdef; pdef=pdef->next) {
+        def_t* def = pdef->data;
+        printf("%s args %zu locals %u\n", def->name, length(def->args), countLocals(def));
     }
     list_t* penv;
     for (penv = env; penv; penv=penv->next) {
