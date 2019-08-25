@@ -1302,54 +1302,36 @@ void stepOp(const Instruction* ins) {
 	}
 }
 void stepCheckMarkers(const Instruction* ins) {
-	unsigned stack_check_length = length(stack);
 	list_t* checkStack = stack;
-	struct Closure* check = head(checkStack); checkStack=tail(checkStack);
-	for (unsigned m=0; m<ins->take; ++m) {
+	unsigned iStack=0;
+	while (checkStack != 0 && iStack < ins->take) {
+		struct Closure* check = head(checkStack); checkStack=tail(checkStack);
 		if (check->pc <= MARKER_PC) {
-			printf("checkmarkers %d: Found %s in arg %d\n", ins->take, pcToString(check->pc), m);
 			ptrdiff_t slot = MARKER_PC - check->pc;
-			if (m > 0) {
-				printf("Marker references slot %ld of this frame ", slot); showSomeFrame(check->framePtr);
-				struct Frame* newFramePtr = NEWFRAME(m);
-				for (unsigned i=0; i<m; ++i) {
-					newFramePtr->closures[i] = *(struct Closure*)head(stack); stack=tail(stack);
-				}
-				check->framePtr->closures[slot].framePtr = newFramePtr;
-				// what was the destination? It was the checkMarkers instruction, i.e. current state.pc
-				check->framePtr->closures[slot].pc = state.pc-m;
-				printf("Marker update results in changed frame "); showSomeFrame(check->framePtr);
-				printf("New frame from checkmarkers %d is ", ins->take); showSomeFrame(newFramePtr); //puts("");
-				for (int i=m-1; i>=1; i--) {
-					struct Closure* n = NEW(struct Closure);
-					n->pc = i*2;
-					n->framePtr = newFramePtr;
-					stack = cons(n, stack);
-					printf("Updating stack member %d with %s|%p\n", i, pcToString(n->pc), n->framePtr);
-				}
-				struct Closure* n = NEW(struct Closure);
-				n->pc = m*2;
-				n->framePtr=newFramePtr;
-				stack = tail(stack);
-				stack = cons(n, stack);
-				//Assertion is invalid, stack depth is changed.
-				//assert(length(stack) == stack_check_length);
-			} else {
-				// The marker was first so it needs to be dropped.
-				// We still need to do the thing to the frame referred to by the marker.
-				stack = tail(stack);
+			struct Frame* newFramePtr = NEWFRAME(iStack);
+			list_t* ws = stack;
+			for (unsigned i=0; i<iStack; ++i) {
+				newFramePtr->closures[i] = *(struct Closure*)head(ws); ws = tail(ws);
 			}
-			printf("Stack after checkmarkers on %d: S:", m); printStack();
-			//An SC doesn't have a frame until the take, why was this written?
-			//state.frame[slot].pc = state.pc - 1 - m - 1;
-			//state.frame[slot].frame = newFrame;
-			state.pc--; // step back
+			check->framePtr->closures[slot].framePtr = newFramePtr;
+			check->framePtr->closures[slot].pc = state.pc - iStack;
+			ws = stack;
+			struct Closure* reloc = NEWA(struct Closure, iStack);
+			for (unsigned r=0; r<iStack; ++r) {
+				reloc[r] = *(struct Closure*)ws->data;
+				ws = ws->next;
+			}
+			stack = ws->next;
+			printf("%d: Closures and marker popped S:", __LINE__); printStack();
+			for (unsigned r=iStack; r>0; r--) {
+				stack = cons(&reloc[r-1], stack);
+				printf("%d: Removing marker S:", __LINE__); printStack();
+			}
+			printf("%d: Removing marker S:", __LINE__); printStack();
+			state.pc--;
 			return;
 		}
-		printf("m %d check %p checkStack %p head %p tail %p\n", m, check, checkStack, checkStack?head(checkStack):NULL, checkStack?tail(checkStack):NULL);
-		if (checkStack) {
-			check = head(checkStack); checkStack=tail(checkStack);
-		}
+		iStack++;
 	}
 }
 void stepMove(Instruction* ins) {
