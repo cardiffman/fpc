@@ -1087,12 +1087,17 @@ enum {
 };
 static ptrdiff_t MARKER_PC = -2;
 
+struct Frame;
 struct Closure {
 	ptrdiff_t pc;
 	union {
-	struct Closure* frame;
+	struct Frame* framePtr; //struct Closure* frame;
 	ptrdiff_t value;
 	};
+};
+struct Frame {
+	int frameElements;
+	struct Closure* closures;
 };
 list_t* stack;
 struct Closure state;
@@ -1113,14 +1118,16 @@ char* pcToString(ptrdiff_t pc)
 	}
 	return text;
 }
-void showSomeFrameElts(struct Closure* frame, int elts) {
-	for (int i=0; i<elts; ++i) {
-		printf("%s|%p ", pcToString(frame[i].pc), frame[i].frame);
+void showSomeFrameElts(struct Frame* frame, int elts) {
+	if (frame) {
+		for (int i=0; i<elts; ++i) {
+			printf("%s|%p ", pcToString(frame->closures[i].pc), frame->closures[i].framePtr);
+		}
+		puts("");
 	}
-	puts("");
 }
-void showSomeFrame(struct Closure* frame) {
-	showSomeFrameElts(frame, 2);
+void showSomeFrame(struct Frame* frame) {
+	showSomeFrameElts(frame, frame->frameElements);
 }
 void showMainFrameElts(int elts) {
 	if (state.pc == SELF)
@@ -1129,11 +1136,12 @@ void showMainFrameElts(int elts) {
 	}
 	else
 	{
-		showSomeFrameElts(state.frame, elts);
+		showSomeFrameElts(state.framePtr, elts);
 	}
 }
 void showMainFrame() {
-	showMainFrameElts(2);
+	if (state.pc != SELF && state.framePtr)
+	showMainFrameElts(state.framePtr->frameElements);
 }
 void printStack()
 {
@@ -1142,18 +1150,24 @@ void printStack()
 		if (closure->pc == -1)
 			printf(" %s|%ld", pcToString(closure->pc), closure->value);
 		else
-			printf(" %s|%p", pcToString(closure->pc), closure->frame);
+			printf(" %s|%p", pcToString(closure->pc), closure->framePtr);
 	}
 	printf("%s", "\n");
 }
+struct Frame* NEWFRAME(int n) {
+	struct Frame* nf = NEW(struct Frame);
+	nf->frameElements = n;
+	nf->closures = NEWA(struct Closure, n);
+	return nf;
+}
 void stepTake(const Instruction* ins) {
-	state.frame = NEWA(struct Closure, ins->take);
+	state.framePtr = NEWFRAME(ins->frameSize);
 	for (unsigned i=0; i<ins->take; ++i) {
-		state.frame[i] = *(struct Closure*)head(stack);
+		state.framePtr->closures[i] = *(struct Closure*)head(stack);
 		stack = tail(stack);
 	}
-	printf("New Frame: ");
-	showMainFrameElts(ins->take);
+	printf("New Frame: F:");
+	showMainFrameElts(ins->frameSize);
 }
 void stepPush(const Instruction* ins) {
 	struct Closure* toPush = NULL;
@@ -1164,15 +1178,15 @@ void stepPush(const Instruction* ins) {
 		toPush->pc = SELF;
 		break;
 	case Arg:
-		if (state.frame == 0)
+		if (state.framePtr == 0)
 		{
 			assert(!"Frame should not be NULL when pushing arg");
 		}
 		toPush = NEW(struct Closure);
-		*toPush = state.frame[ins->addr.params.arg];
+		*toPush = state.framePtr->closures[ins->addr.params.arg];
 		break;
 	case Label:
-		if (state.frame == 0)
+		if (state.framePtr == 0)
 		{
 			//assert(!"Frame should not be NULL when pushing label");
 			// frame can be zero if main just returns an expression with no
@@ -1183,21 +1197,21 @@ void stepPush(const Instruction* ins) {
 		}
 		toPush = NEW(struct Closure);
 		toPush->pc = ins->addr.params.address;
-		toPush->frame = state.frame;
+		toPush->framePtr = state.framePtr;
 		break;
 	case Super:
 		toPush = NEW(struct Closure);
 		toPush->pc = ins->addr.params.address;
-		toPush->frame = NULL;
+		toPush->framePtr = NULL;
 		break;
 	case Marker:
-		if (state.frame == 0)
+		if (state.framePtr == 0)
 		{
 			assert(!"Frame should not be NULL when pushing marker");
 		}
 		toPush = NEW(struct Closure);
 		toPush->pc = MARKER_PC - ins->addr.params.arg;
-		toPush->frame = state.frame;
+		toPush->framePtr = state.framePtr;
 		break;
 	default:
 		puts("Invalid push instruction"); exit(1); break;
@@ -1212,12 +1226,12 @@ void stepEnter(const Instruction* ins) {
 	case Num:
 		state.pc = SELF;
 		state.value = ins->addr.params.address;
-		showMainFrame();
+		printf("F:"); showMainFrame();
 		break;
 	case Arg:
-		printf("Entering Arg %u: %s\n", ins->addr.params.arg, pcToString(state.frame[ins->addr.params.arg].pc));
-		showMainFrame();
-		arg = &state.frame[ins->addr.params.arg];
+		printf("Entering Arg %u: %s\n", ins->addr.params.arg, pcToString(state.framePtr->closures[ins->addr.params.arg].pc));
+		printf("F:"); showMainFrame();
+		arg = &state.framePtr->closures[ins->addr.params.arg];
 		if (arg->pc == SELF)
 		{
 			closure = head(stack);
@@ -1226,10 +1240,10 @@ void stepEnter(const Instruction* ins) {
 			{
 				int slot = MARKER_PC - closure->pc;
 				// Put SELF,value in the slot of the frame that the closure has.
-				closure->frame[slot].pc = arg->pc;
-				closure->frame[slot].value = arg->value;
-				state.pc = closure->frame[slot].pc;
-				state.frame = closure->frame[slot].frame;
+				closure->framePtr->closures[slot].pc = arg->pc;
+				closure->framePtr->closures[slot].value = arg->value;
+				state.pc = closure->framePtr->closures[slot].pc;
+				state.framePtr = closure->framePtr->closures[slot].framePtr;
 			}
 			else
 			{
@@ -1240,25 +1254,25 @@ void stepEnter(const Instruction* ins) {
 				//state.value = ins->addr.params.address;
 				stack = cons(arg, stack);
 				state.pc = closure->pc;
-				state.frame = closure->frame;
-				showMainFrame();
+				state.framePtr = closure->framePtr;
+				printf("F:"); showMainFrame();
 			}
 		}
 		else
 		{
-			if (arg->frame == NULL)
+			if (arg->framePtr == NULL)
 				assert("Entering arg whose frame is NULL");
-			state = state.frame[ins->addr.params.arg];
-			if (state.pc >=0 && state.frame != 0) {
+			state = state.framePtr->closures[ins->addr.params.arg];
+			if (state.pc >=0 && state.framePtr != 0) {
 				printf("Enter w/New Frame: ");
-				showMainFrame();
+				printf("F:"); showMainFrame();
 			}
 		}
 		break;
 	case Label:
 		state.pc = ins->addr.params.address;
 		// Entering a label directly does not change the frame pointer.
-		showMainFrame();
+		printf("F:"); showMainFrame();
 		break;
 	case Super:
 		state.pc = ins->addr.params.address;
@@ -1296,38 +1310,45 @@ void stepCheckMarkers(const Instruction* ins) {
 			printf("checkmarkers %d: Found %s in arg %d\n", ins->take, pcToString(check->pc), m);
 			ptrdiff_t slot = MARKER_PC - check->pc;
 			if (m > 0) {
-				struct Closure* newFrame = NEWA(struct Closure, m);
-				for (unsigned i=0; i<m-1; ++i) {
-					newFrame[i] = *(struct Closure*)head(stack); stack=tail(stack);
+				printf("Marker references slot %ld of this frame ", slot); showSomeFrame(check->framePtr);
+				struct Frame* newFramePtr = NEWFRAME(m);
+				for (unsigned i=0; i<m; ++i) {
+					newFramePtr->closures[i] = *(struct Closure*)head(stack); stack=tail(stack);
 				}
-				check->frame[slot].frame = newFrame;
+				check->framePtr->closures[slot].framePtr = newFramePtr;
 				// what was the destination? It was the checkMarkers instruction, i.e. current state.pc
-				check->frame[slot].pc = state.pc-1;
-				printf("New frame from checkmarkers %d is ", ins->take); showSomeFrameElts(newFrame, m+1);
+				check->framePtr->closures[slot].pc = state.pc-m;
+				printf("Marker update results in changed frame "); showSomeFrame(check->framePtr);
+				printf("New frame from checkmarkers %d is ", ins->take); showSomeFrame(newFramePtr); //puts("");
 				for (int i=m-1; i>=1; i--) {
 					struct Closure* n = NEW(struct Closure);
 					n->pc = i*2;
-					n->frame = newFrame;
+					n->framePtr = newFramePtr;
 					stack = cons(n, stack);
-					printf("Updating stack member %d with %s|%p", i, pcToString(n->pc), n->frame);
+					printf("Updating stack member %d with %s|%p\n", i, pcToString(n->pc), n->framePtr);
 				}
 				struct Closure* n = NEW(struct Closure);
 				n->pc = m*2;
-				n->frame=newFrame;
+				n->framePtr=newFramePtr;
 				stack = tail(stack);
 				stack = cons(n, stack);
-				assert(length(stack) == stack_check_length);
+				//Assertion is invalid, stack depth is changed.
+				//assert(length(stack) == stack_check_length);
 			} else {
 				// The marker was first so it needs to be dropped.
 				// We still need to do the thing to the frame referred to by the marker.
 				stack = tail(stack);
 			}
-			printf("Stack after checkmarkers on %d: ", m); printStack();
+			printf("Stack after checkmarkers on %d: S:", m); printStack();
 			//An SC doesn't have a frame until the take, why was this written?
 			//state.frame[slot].pc = state.pc - 1 - m - 1;
 			//state.frame[slot].frame = newFrame;
 			state.pc--; // step back
 			return;
+		}
+		printf("m %d check %p checkStack %p head %p tail %p\n", m, check, checkStack, checkStack?head(checkStack):NULL, checkStack?tail(checkStack):NULL);
+		if (checkStack) {
+			check = head(checkStack); checkStack=tail(checkStack);
 		}
 	}
 }
@@ -1342,15 +1363,15 @@ void stepMove(Instruction* ins) {
 		toMove->pc = SELF;
 		break;
 	case Arg:
-		if (state.frame == 0)
+		if (state.framePtr == 0)
 		{
 			assert(!"Frame should not be NULL when pushing arg");
 		}
 		toMove = NEW(struct Closure);
-		*toMove = state.frame[ins->addr.params.arg];
+		*toMove = state.framePtr->closures[ins->addr.params.arg];
 		break;
 	case Label:
-		if (state.frame == 0)
+		if (state.framePtr == 0)
 		{
 			//assert(!"Frame should not be NULL when pushing label");
 			// frame can be zero if main just returns an expression with no
@@ -1361,26 +1382,26 @@ void stepMove(Instruction* ins) {
 		}
 		toMove = NEW(struct Closure);
 		toMove->pc = ins->addr.params.address;
-		toMove->frame = state.frame;
+		toMove->framePtr = state.framePtr;
 		break;
 	case Super:
 		toMove = NEW(struct Closure);
 		toMove->pc = ins->addr.params.address;
-		toMove->frame = NULL;
+		toMove->framePtr = NULL;
 		break;
 	case Marker:
-		if (state.frame == 0)
+		if (state.framePtr == 0)
 		{
 			assert(!"Frame should not be NULL when pushing marker");
 		}
 		toMove = NEW(struct Closure);
 		toMove->pc = MARKER_PC - ins->addr.params.arg;
-		toMove->frame = state.frame;
+		toMove->framePtr = state.framePtr;
 		break;
 	default:
 		puts("Invalid push instruction"); exit(1); break;
 	}
-	state.frame[ins->take] = *toMove;
+	state.framePtr->closures[ins->take] = *toMove;
 }
 void step(CodeArray* code) {
 	//if (state.pc < 0)
@@ -1416,9 +1437,9 @@ void step(CodeArray* code) {
 	if (state.pc == SELF) {
 		struct Closure* mark = head(stack);
 		while (mark->pc <= MARKER_PC) {
-			struct Closure* fr = mark->frame;
+			struct Frame* fr = mark->framePtr;
 			int slot = MARKER_PC - mark->pc;
-			fr[slot] = state;
+			fr->closures[slot] = state;
 			stack = tail(stack);
 			mark = head(stack);
 		}
@@ -1560,15 +1581,19 @@ int main(int argc, char** argv)
     state.pc = start_am.params.address;
     struct Closure* ret = NEW(struct Closure);
     ret->pc = haltat;
-    ret->frame = NULL;
+    ret->framePtr = NULL;
 	stack = cons(ret, stack);
-	while (code.code[state.pc].ins != Halt) {
+	while (state.pc >= 0 && code.code[state.pc].ins != Halt) {
 		printf("%s: %s\n", pcToString(state.pc), instructionToString(&code.code[state.pc]));
-		printStack();
+		printf("S:");printStack();
 		step(&code);
 	}
-	printf("%s: %s\n", pcToString(state.pc), instructionToString(&code.code[state.pc]));
-	printStack();
+	if (state.pc < 0)
+		printf("Error: PC is Non-executable: %s\n", pcToString(state.pc));
+	else
+		printf("%s: %s\n", pcToString(state.pc), instructionToString(&code.code[state.pc]));
+	printf("F:"); showMainFrame();
+	printf("S:"); printStack();
 
 
 	return 0;
