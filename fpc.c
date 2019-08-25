@@ -132,6 +132,7 @@ typedef enum {
 	T_SUB,
 	T_MUL,
 	T_DIV,
+	T_MOD,
 	T_LET,
 	T_IN,
 	//T_IF,
@@ -221,6 +222,7 @@ void next() {
 		case '-': token.type = T_SUB; break;
 		case '*': token.type = T_MUL; break;
 		case '/': token.type = T_DIV; break;
+		case '%': token.type = T_MOD; break;
 		}
 		break;
 	case 2: // 2-character sequence
@@ -250,6 +252,7 @@ const char* token_to_string(const tkn* token) {
 	case T_SUB: snprintf(buf, 50, "T_SUB"); break;
 	case T_ADD: snprintf(buf, 50, "T_ADD"); break;
 	case T_DIV: snprintf(buf, 50, "T_DIV"); break;
+	case T_MOD: snprintf(buf, 50, "T_MOD"); break;
 	case T_IN: snprintf(buf, 50, "T_IN"); break;
 	case T_LET: snprintf(buf, 50, "T_LET"); break;
 	default: snprintf(buf, 50, "%d", token->type); break;
@@ -298,6 +301,7 @@ bool binop(Token t) {
 	case T_SUB:
 	case T_MUL:
 	case T_DIV:
+	case T_MOD:
 	case T_LT:
 		return true;
 	default: break;
@@ -318,7 +322,7 @@ int precedence(Token t) {
 		return 4;
 	case T_ADD: case T_SUB:
 		return 5;
-	case T_DIV:
+	case T_DIV: case T_MOD:
 		return 6;
 	case T_MUL:
 		return 7;
@@ -604,7 +608,7 @@ const char* amToString(AddressModeMode am) {
 	return "amxxx";
 }
 typedef enum OpType {
-	Add, Sub, Mul, Div, Lt
+	Add, Sub, Mul, Div, Mod, Lt
 } OpType;
 const char* opToString(OpType op) {
 	switch (op) {
@@ -612,6 +616,7 @@ const char* opToString(OpType op) {
 	case Sub: return "Sub";
 	case Mul: return "Mul";
 	case Div: return "Div";
+	case Mod: return "Mod";
 	case Lt: return "Lt";
 	}
 	return "opxxx";
@@ -848,10 +853,10 @@ LetAddressMode compileAExp(const expr_t* exp, int d, list_t* env) {
 		break;
 	}
 	case EXPR_VAR: {
+		m.d = d;
 		if (!find_mode(env, exp->var, &m.am)) {
 			m.am.mode = Super;
 			m.am.params.address = 9999;
-			m.d = d;
 		}
 		break;
 	}
@@ -894,6 +899,7 @@ code_regs_t compileROper(code_regs_t code, int d, const expr_oper_t op, list_t* 
 	case T_SUB: found = find_mode(env, "-", &mode); break;
 	case T_MUL: found = find_mode(env, "*", &mode); break;
 	case T_DIV: found = find_mode(env, "/", &mode); break;
+	case T_MOD: found = find_mode(env, "%", &mode); break;
 	case T_LT: found = find_mode(env, "<", &mode); break;
 	default:
 		puts("Unhandled operator in compileROper"); exit(1); break;
@@ -1243,6 +1249,7 @@ void stepOp(const Instruction* ins) {
 	case Mul: state.value = leftC->value * rightC->value; break;
 	case Sub: state.value = leftC->value - rightC->value; break;
 	case Div: state.value = leftC->value / rightC->value; break;
+	case Mod: state.value = leftC->value % rightC->value; break;
 	case Lt:  state.value = leftC->value < rightC->value; break;
 	}
 }
@@ -1473,6 +1480,7 @@ int main(int argc, char** argv)
     addOpCombinator(&code, Mul, "*", &env);
     addOpCombinator(&code, Sub, "-", &env);
     addOpCombinator(&code, Div, "/", &env);
+    addOpCombinator(&code, Mod, "%", &env);
     addOpCombinator(&code, Lt,  "<", &env);
     addCondCombinator(&code, &env);
     list_t* pdef;
