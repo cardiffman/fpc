@@ -10,3 +10,4 @@ The point of this is more just to guide the development of the fpa project than 
 Added a let form. Used the method of Peyton-Jones and Lester which uses a special Move instruction
 to initialize a closure with the value of a let-bound variable.
 
+Corrected CheckMarkers instruction so that more update scenarios work.

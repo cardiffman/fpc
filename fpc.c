@@ -116,8 +116,10 @@ typedef struct {
 
 typedef enum {
 	T_NAME,
-	T_PUNCT,
 	T_NUM,
+	T_CHAR,
+	T_STR,
+	T_PUNCT,
 	T_SEMI,
 	T_EQUALS,
 	T_LPAREN,
@@ -174,9 +176,22 @@ void next() {
 	case ';': token.type = T_SEMI; nextChar(); return;
 	case '(': token.type = T_LPAREN; nextChar(); return;
 	case ')': token.type = T_RPAREN; nextChar(); return;
+	case '\'': token.type = T_CHAR; nextChar(); token.value = ch; nextChar(); assert(ch=='\''); nextChar(); return;
 	}
 	char* t = malloc(128);
 	char* s = t;
+	if (ch=='"') {
+		nextChar();
+		while (ch != '"') {
+			*t++ = ch;
+			nextChar();
+		}
+		nextChar();
+		token.type = T_STR;
+		free(token.s);
+		token.s = s;
+		return;
+	}
 	if (isalpha(ch)) {
 		while (isalnum(ch) || ch=='_' || ch=='\'')
 		{
@@ -265,6 +280,8 @@ void pprint_expr(int col, const expr_t *e);
 expr_t* mkleaf(tkn t) {
 	expr_t* r = NEW(expr_t);
 	switch (t.type) {
+	case T_STR: r->tag = EXPR_STR; r->var = strdup(t.s); break;
+	case T_CHAR: r->tag = EXPR_NUM; r->num = t.value; break;
 	case T_NAME: r->tag = EXPR_VAR; r->var = strdup(t.s); break;
 	case T_NUM: r->tag = EXPR_NUM; r->num = t.value; break;
 	default: return NULL;
@@ -288,6 +305,8 @@ bool atom(tkn t) {
 	switch (t.type) {
 	case T_NAME:
 	case T_NUM:
+	case T_CHAR:
+	case T_STR:
 		return true;
 	default: break;
 	}
@@ -522,7 +541,7 @@ void pprint_expr(int col, const expr_t *e)
         pprint_expr(col+4, e->app.arg);
         break;
     case EXPR_STR:
-        printf("STR %s\n", e->str);
+        printf("STR \"%s\"\n", e->str);
         break;
     case EXPR_NUM:
         printf("NUM %d\n", e->num);
