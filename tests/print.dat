@@ -32,13 +32,4 @@ digits n xs =
 printstr xs =
 	map putChar xs;
 
-print n = 
-	let 
-		num = n / 10; 
-		mod = n % 10; 
-	in 
-		if (num < 10) 
-			(putChar (num + 48)) 
-			(print num);
-#main = print 12345;
 main = printstr (digits 12345 nil);
