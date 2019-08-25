@@ -68,7 +68,7 @@ typedef enum {
 	EXPR_LET
 } exprtag_t;
 
-typedef char *expr_var_t;
+typedef const char *expr_var_t;
 
 typedef struct {
     const struct expr *fun;
