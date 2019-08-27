@@ -72,7 +72,7 @@ typedef const char *expr_var_t;
 
 typedef struct {
     const struct expr *fun;
-    const struct expr *arg;
+    list_t *args;
 } expr_app_t;
 
 typedef char *expr_str_t;
@@ -295,10 +295,14 @@ expr_t* mkop(Token t) {
 	return r;
 }
 expr_t* mkapp(expr_t* fun, expr_t* arg) {
+	if (fun->tag == EXPR_APP) {
+		fun->app.args = cons(arg, fun->app.args);
+		return fun;
+	}
 	expr_t* r = NEW(expr_t);
 	r->tag = EXPR_APP;
 	r->app.fun = fun;
-	r->app.arg = arg;
+	r->app.args = cons(arg, r->app.args);
 	return r;
 }
 bool atom(tkn t) {
@@ -537,9 +541,11 @@ void pprint_expr(int col, const expr_t *e)
     case EXPR_APP:
         printf("APP ");
         pprint_expr(col+4, e->app.fun);
-        indent(col+4);
-        pprint_expr(col+4, e->app.arg);
-        break;
+        for (p = e->app.args; p != NULL; p = p->next) {
+            indent(col+4);
+			pprint_expr(col+4, (expr_t*)p->data);
+        }
+		break;
     case EXPR_STR:
         printf("STR \"%s\"\n", e->str);
         break;
@@ -936,11 +942,16 @@ code_regs_t compileRNum(code_regs_t code, int d, expr_num_t num, list_t* env) {
 	return code;
 }
 static
-code_regs_t compileRApp(code_regs_t code, int d, expr_app_t app, list_t* env) {
+code_regs_t compileRApp(code_regs_t code, int dp, expr_app_t app, list_t* env) {
 	// compileR (EAp e1 e2) env = Push (compileA e2 env) : compileR e1 env
-	LetAddressMode toPush = compileAExp(app.arg, d, env);
-	pushInstruction(code.code, toPush.am);
-	return compileRExp(code, toPush.d, app.fun, env);
+	int d=dp;
+	for (list_t* arg = app.args; arg != NULL; arg = arg->next)
+	{
+		LetAddressMode toPush = compileAExp((expr_t*)arg->data, d, env);
+		if (toPush.d > d) d = toPush.d;
+		pushInstruction(code.code, toPush.am);
+	}
+	return compileRExp(code, d, app.fun, env);
 }
 static
 code_regs_t compileROper(code_regs_t code, int d, const expr_oper_t op, list_t* env) {
@@ -1183,7 +1194,7 @@ struct Frame* NEWFRAME(int n) {
 }
 void stepTake(const Instruction* ins) {
 	state.framePtr = NEWFRAME(ins->frameSize);
-	for (unsigned i=0; i<ins->take; ++i) {
+	for (unsigned i=0; i<ins->take && stack; ++i) {
 		state.framePtr->closures[i] = *(struct Closure*)head(stack);
 		stack = tail(stack);
 	}
